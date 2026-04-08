@@ -1,0 +1,5 @@
+input_normalized	output_name	valid_from	valid_to	priority	note
+istanbul	Constantinopolis	0330-01-01	1453-12-31	200	Default medieval Latin output before Ottoman era
+istanbul	Byzantium	-0660-01-01	0329-12-31	200	Default antique Latin output
+constantinople	Constantinopolis	0330-01-01	1453-12-31	250	Canonical Latinized form
+new york	Novum Eboracum	1500-01-01	2100-12-31	50	Neo-Latin form

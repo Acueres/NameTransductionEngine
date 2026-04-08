@@ -1,0 +1,58 @@
+id: latin
+display_name: Latin
+bcp47: la
+scripts:
+  - Latn
+
+kind: historical_language_pack
+version: 0.1.0
+
+supports:
+  place_conversion: true
+  place_generation: false
+  person_generation: false
+  historical_dates: true
+
+default_mode: lookup_first
+
+date_policy:
+  enabled: true
+  default_era: medieval
+  eras:
+    - id: antique
+      label: Antiquity
+      start: "-0750-01-01"
+      end: "0476-12-31"
+    - id: medieval
+      label: Medieval
+      start: "0477-01-01"
+      end: "1499-12-31"
+    - id: neolatin
+      label: Neo-Latin
+      start: "1500-01-01"
+      end: "2100-12-31"
+
+source_preferences:
+  geonames_languages:
+    - la
+  use_geonames_historic_flag: true
+  use_geonames_from_to_when_present: true
+  allow_untyped_historic_candidates: true
+  allow_untyped_candidates_only_if_supported_by_override: true
+
+ranking:
+  override_exact_match_bonus: 10000
+  exact_la_bonus: 300
+  source_date_overlap_bonus: 120
+  historic_bonus: 40
+  untyped_penalty: -120
+  generated_penalty: -500
+
+fallbacks:
+  - type: source_lookup
+    source: geonames
+  - type: pack_exonym_dictionary
+  - type: strict_transliteration
+
+notes: >
+  Standard Latin pack.

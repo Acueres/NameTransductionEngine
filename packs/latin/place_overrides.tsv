@@ -1,0 +1,4 @@
+namespace	external_id	output_name	valid_from	valid_to	priority	tags	note
+geonames	745044	Byzantium	-0660-01-01	0329-12-31	1000	antique,historic	Preferred antiquity-era Latin form for Istanbul/Constantinople entity
+geonames	745044	Constantinopolis	0330-01-01	1453-12-31	1000	medieval,historic	Preferred late antique / medieval Latin form
+geonames	745044	Nova Roma	0330-01-01	0400-12-31	400	ceremonial,historic	    Ceremonial variant

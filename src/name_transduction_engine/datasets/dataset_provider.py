@@ -1,4 +1,4 @@
-from .paths import DB_PATH_GEONAMES
+from name_transduction_engine.paths import DB_PATH_GEONAMES
 from .geonames.data_provision import ensure_geonames_sqlite
 
 

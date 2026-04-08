@@ -1,0 +1,15 @@
+cases:
+  - input: Istanbul
+    pack: latin
+    date: "0140-01-01"
+    expected_top_1: Byzantium
+
+  - input: Istanbul
+    pack: latin
+    date: "1100-01-01"
+    expected_top_1: Constantinopolis
+
+  - input: Constantinople
+    pack: latin
+    date: "1200-01-01"
+    expected_top_1: Constantinopolis

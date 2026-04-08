@@ -5,7 +5,7 @@ import unicodedata
 from io import TextIOWrapper
 from pathlib import Path
 from zipfile import ZipFile
-from datasets.paths import RAW_DIR_GEONAMES
+from name_transduction_engine.paths import RAW_DIR_GEONAMES
 
 
 SPECIAL_ISOLANGUAGE = {
