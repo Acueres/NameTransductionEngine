@@ -6,8 +6,8 @@ from pathlib import Path
 class BuiltinPackPaths:
     root: Path
     manifest: Path
-    place_overrides: Path
-    exonyms: Path
+    entity_names: Path
+    string_exonyms: Path
 
 
 def discover_builtin_packs(builtin_packs_dir: Path) -> list[BuiltinPackPaths]:
@@ -27,8 +27,8 @@ def discover_builtin_packs(builtin_packs_dir: Path) -> list[BuiltinPackPaths]:
             BuiltinPackPaths(
                 root=pack_dir,
                 manifest=manifest,
-                place_overrides=pack_dir / "place_overrides.tsv",
-                exonyms=pack_dir / "exonyms.tsv",
+                entity_names=pack_dir / "entity_names.tsv",
+                string_exonyms=pack_dir / "string_exonyms.tsv",
             )
         )
 

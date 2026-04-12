@@ -4,12 +4,13 @@ import yaml
 
 from pathlib import Path
 from typing import Any
+
 from name_transduction_engine.enrichment.packs.resolver import BuiltinPackPaths, discover_builtin_packs
 from name_transduction_engine.enrichment.packs.schema import create_pack_schema
 from name_transduction_engine.enrichment.packs.compiler import rebuild_builtin_pack
 
 
-REQUIRED_MANIFEST_KEYS = {"id", "display_name", "version"}
+REQUIRED_MANIFEST_KEYS = {"id", "display_name", "version", "bcp47", "kind"}
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
@@ -35,6 +36,9 @@ def _load_manifest(manifest_path: Path) -> dict[str, Any]:
 
 
 def _compute_pack_hash(paths: BuiltinPackPaths) -> str:
+    """
+    SHA-256 over all files in the pack directory, sorted by relative path
+    """
     hasher = hashlib.sha256()
 
     for file_path in sorted(p for p in paths.root.rglob("*") if p.is_file()):
@@ -47,7 +51,7 @@ def _compute_pack_hash(paths: BuiltinPackPaths) -> str:
     return hasher.hexdigest()
 
 
-def _pack_build_is_current(
+def _pack_is_current(
     conn: sqlite3.Connection,
     pack_id: str,
     content_hash: str,
@@ -55,7 +59,7 @@ def _pack_build_is_current(
     row = conn.execute(
         """
         SELECT content_hash
-        FROM pack_build
+        FROM pack_install
         WHERE pack_id = ?
         """,
         (pack_id,),
@@ -69,10 +73,14 @@ def ensure_builtin_pack_enrichment(
     builtin_packs_dir: Path,
 ) -> Path:
     """
-    Ensure pack-scoped enrichment tables exist and are populated
-    from all built-in packs.
+    Ensure pack-scoped enrichment tables exist and are populated from all
+    built-in packs found under builtin_packs_dir.
 
-    Safe to call repeatedly.
+    Safe to call repeatedly: packs whose content hash has not changed since
+    the last build are skipped.
+
+    The DB at db_path must already exist and contain the GeoNames tables
+    (geoname, alternate_name), as entity_names.tsv validation queries them.
     """
     if not db_path.exists():
         raise FileNotFoundError(f"SQLite DB does not exist yet: {db_path}")
@@ -93,11 +101,11 @@ def ensure_builtin_pack_enrichment(
             pack_id = str(manifest["id"]).strip()
             content_hash = _compute_pack_hash(paths)
 
-            if _pack_build_is_current(conn, pack_id=pack_id, content_hash=content_hash):
-                print(f"Skipping pack {pack_id}: unchanged.")
+            if _pack_is_current(conn, pack_id=pack_id, content_hash=content_hash):
+                print(f"Pack {pack_id!r}: up to date, skipping.")
                 continue
 
-            print(f"Building built-in pack enrichment: {pack_id}")
+            print(f"Pack {pack_id!r}: building enrichment.")
             rebuild_builtin_pack(
                 conn=conn,
                 paths=paths,
@@ -106,6 +114,11 @@ def ensure_builtin_pack_enrichment(
             )
 
         conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
     finally:
         conn.close()
 

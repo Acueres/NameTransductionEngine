@@ -1,0 +1,5 @@
+input	output_name	valid_from	valid_to	priority	note
+Istanbul	Byzantium	-0660-01-01	0329-12-31	100	String fallback when entity lookup is unavailable
+Istanbul	Constantinopolis	0330-01-01	1453-12-31	100	String fallback when entity lookup is unavailable
+Constantinople	Constantinopolis	0330-01-01	1453-12-31	100	Canonical Latinised form; higher-quality inputs deserve the same output
+New York	Novum Eboracum	1500-01-01	2100-12-31	100	Neo-Latin humanist coinage; no GeoNames la-tagged alternate exists

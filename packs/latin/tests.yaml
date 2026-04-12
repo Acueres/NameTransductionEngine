@@ -1,15 +1,119 @@
 cases:
-  - input: Istanbul
+  # ----------------------------------------------------------
+  # Core era coverage
+  # ----------------------------------------------------------
+
+  - id: istanbul_antique
+    desc: "Istanbul in the antique era resolves via entity_lookup to Byzantium"
+    input: Istanbul
     pack: latin
     date: "0140-01-01"
     expected_top_1: Byzantium
+    expected_pipeline_step: entity_lookup
 
-  - input: Istanbul
+  - id: istanbul_medieval
+    desc: "Istanbul in the medieval era resolves to Constantinopolis"
+    input: Istanbul
     pack: latin
     date: "1100-01-01"
     expected_top_1: Constantinopolis
+    expected_pipeline_step: entity_lookup
 
-  - input: Constantinople
+  - id: constantinople_medieval
+    desc: "The Latinised input form Constantinople also resolves correctly"
+    input: Constantinople
     pack: latin
     date: "1200-01-01"
     expected_top_1: Constantinopolis
+    expected_pipeline_step: entity_lookup
+
+  # ----------------------------------------------------------
+  # Date boundary tests
+  # These are the cases most likely to reveal off-by-one errors
+  # in valid_from / valid_to range logic.
+  # ----------------------------------------------------------
+
+  - id: boundary_last_antique_day
+    desc: "Last day of Byzantium validity (0329-12-31 inclusive)"
+    input: Istanbul
+    pack: latin
+    date: "0329-12-31"
+    expected_top_1: Byzantium
+
+  - id: boundary_first_medieval_day
+    desc: "First day of Constantinopolis validity (0330-01-01 inclusive)"
+    input: Istanbul
+    pack: latin
+    date: "0330-01-01"
+    expected_top_1: Constantinopolis
+
+  - id: boundary_last_constantinopolis_day
+    desc: "Last day of Constantinopolis validity (1453-12-31 inclusive)"
+    input: Istanbul
+    pack: latin
+    date: "1453-12-31"
+    expected_top_1: Constantinopolis
+
+  - id: boundary_post_ottoman
+    desc: "After the fall, no Latin entity name exists; engine falls to transliteration"
+    input: Istanbul
+    pack: latin
+    date: "1454-01-01"
+    expected_pipeline_step: icu_transliteration
+
+  # ----------------------------------------------------------
+  # Top-k / variant tests
+  # ----------------------------------------------------------
+
+  - id: nova_roma_in_top_k
+    desc: "Nova Roma (priority 30) must appear as a candidate in early medieval period"
+    input: Istanbul
+    pack: latin
+    date: "0340-01-01"
+    expected_top_1: Constantinopolis
+    expected_contains: [Nova Roma]
+
+  - id: nova_roma_not_in_top_k_after_400
+    desc: "Nova Roma must not appear after its valid_to date"
+    input: Istanbul
+    pack: latin
+    date: "0401-01-01"
+    expected_top_1: Constantinopolis
+    expected_not_contains: [Nova Roma]
+
+  # ----------------------------------------------------------
+  # String exonym path
+  # ----------------------------------------------------------
+
+  - id: novum_eboracum
+    desc: "New York has no entity ID; must resolve via string_exonym"
+    input: New York
+    pack: latin
+    date: "1700-01-01"
+    expected_top_1: Novum Eboracum
+    expected_pipeline_step: string_exonym
+
+  - id: novum_eboracum_not_before_era
+    desc: "New York / Novum Eboracum has no Latin name before the Neo-Latin era"
+    input: New York
+    pack: latin
+    date: "1200-01-01"
+    expected_pipeline_step: icu_transliteration
+
+  # ----------------------------------------------------------
+  # Fallback chain
+  # ----------------------------------------------------------
+
+  - id: unknown_place_falls_to_transliteration
+    desc: "A place with no override and no string exonym must reach ICU transliteration"
+    input: Timbuktu
+    pack: latin
+    date: "1300-01-01"
+    expected_pipeline_step: icu_transliteration
+
+  - id: input_normalisation
+    desc: "Case variation in input must produce the same result"
+    input: ISTANBUL
+    pack: latin
+    date: "0140-01-01"
+    expected_top_1: Byzantium

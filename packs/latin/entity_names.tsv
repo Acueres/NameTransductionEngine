@@ -1,0 +1,4 @@
+namespace	entity_id	output_name	valid_from	valid_to	priority	tags	note
+geonames	745044	Byzantium	-0660-01-01	0329-12-31	100	antique,historic	Latin name of the city during the pre-Constantinian era
+geonames	745044	Constantinopolis	0330-01-01	1453-12-31	100	medieval,historic	Standard Latin name from Constantine's refoundation to the Ottoman conquest
+geonames	745044	Nova Roma	0330-01-01	0400-12-31	30	ceremonial,historic	Ceremonial alternative used by Constantine himself; appears in top-k but not top-1

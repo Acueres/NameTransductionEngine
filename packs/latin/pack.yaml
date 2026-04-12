@@ -1,58 +1,60 @@
 id: latin
 display_name: Latin
 bcp47: la
-scripts:
-  - Latn
-
-kind: historical_language_pack
 version: 0.1.0
 
-supports:
+kind: historical
+
+capabilities:
   place_conversion: true
   place_generation: false
+  person_conversion: false
   person_generation: false
   historical_dates: true
 
-default_mode: lookup_first
+output_scripts:
+  - Latn
 
-date_policy:
-  enabled: true
-  default_era: medieval
-  eras:
-    - id: antique
-      label: Antiquity
-      start: "-0750-01-01"
-      end: "0476-12-31"
-    - id: medieval
-      label: Medieval
-      start: "0477-01-01"
-      end: "1499-12-31"
-    - id: neolatin
-      label: Neo-Latin
-      start: "1500-01-01"
-      end: "2100-12-31"
+eras:
+  - id: antique
+    label: Antiquity
+    start: "-0750-01-01"
+    end: "0476-12-31"
+  - id: medieval
+    label: Medieval
+    start: "0477-01-01"
+    end: "1499-12-31"
+  - id: neolatin
+    label: Neo-Latin
+    start: "1500-01-01"
+    end: "2100-12-31"
 
-source_preferences:
-  geonames_languages:
-    - la
-  use_geonames_historic_flag: true
-  use_geonames_from_to_when_present: true
-  allow_untyped_historic_candidates: true
-  allow_untyped_candidates_only_if_supported_by_override: true
+default_era: medieval
+
+pipeline:
+  - step: entity_lookup
+    namespaces: [geonames, wikidata]
+
+  - step: string_exonym
+
+  - step: geonames_source
+    merge: true
+    languages: [la]
+    use_historic_dates: true
+    allow_untyped: false
+
+  - step: icu_transliteration
+    transform: "Any-Latin; NFD; [:Mn:] Remove; NFC"
+
+  - step: uroman
 
 ranking:
-  override_exact_match_bonus: 10000
-  exact_la_bonus: 300
-  source_date_overlap_bonus: 120
-  historic_bonus: 40
-  untyped_penalty: -120
-  generated_penalty: -500
+  entity_lookup_hit: 10000
+  string_exonym_hit: 500
+  geonames_la_tag: 300
+  geonames_historic_flag: 40
 
-fallbacks:
-  - type: source_lookup
-    source: geonames
-  - type: pack_exonym_dictionary
-  - type: strict_transliteration
+  date_overlap: 120
 
-notes: >
-  Standard Latin pack.
+  geonames_untyped: -120
+  transliteration_output: -500

@@ -5,16 +5,28 @@ import sqlite3
 import unicodedata
 
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
+
 from .resolver import BuiltinPackPaths
 
 
+# ---------------------------------------------------------------------------
+# Date validation
+# ---------------------------------------------------------------------------
+
+# Accepts optional leading minus, then 4–6-digit year, then -MM-DD
 PACK_DATE_RE = re.compile(r"^-?\d{4,6}-\d{2}-\d{2}$")
 
-REQUIRED_OVERRIDE_COLUMNS = {
+
+# ---------------------------------------------------------------------------
+# Required TSV columns
+# ---------------------------------------------------------------------------
+
+REQUIRED_ENTITY_NAME_COLUMNS = {
     "namespace",
-    "external_id",
+    "entity_id",
     "output_name",
     "valid_from",
     "valid_to",
@@ -22,14 +34,20 @@ REQUIRED_OVERRIDE_COLUMNS = {
     "tags",
     "note",
 }
-REQUIRED_EXONYM_COLUMNS = {
-    "input_normalized",
+
+REQUIRED_STRING_EXONYM_COLUMNS = {
+    "input",
     "output_name",
     "valid_from",
     "valid_to",
     "priority",
     "note",
 }
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 
 def rebuild_builtin_pack(
@@ -38,122 +56,144 @@ def rebuild_builtin_pack(
     manifest: dict[str, Any],
     content_hash: str,
 ) -> None:
+    """
+    (Re)build all DB rows for one pack inside an already-open transaction.
+    The caller is responsible for committing.
+    """
     pack_id = str(manifest["id"]).strip()
-    display_name = str(manifest["display_name"]).strip()
-    version = str(manifest["version"]).strip()
-    default_mode = (
-        str(manifest.get("default_mode", "lookup_first")).strip() or "lookup_first"
-    )
 
     if pack_id != paths.root.name:
         raise ValueError(
-            f"Pack directory name {paths.root.name!r} does not match manifest id {pack_id!r}"
+            f"Pack directory name {paths.root.name!r} does not match "
+            f"manifest id {pack_id!r}"
         )
 
-    manifest_json = json.dumps(manifest, ensure_ascii=False, sort_keys=True)
-
-    with conn:
-        conn.execute(
-            """
-            INSERT INTO pack (
-                pack_id,
-                display_name,
-                origin,
-                version,
-                default_mode,
-                enabled,
-                source_path,
-                manifest_json,
-                content_hash
-            )
-            VALUES (?, ?, 'builtin', ?, ?, 1, ?, ?, ?)
-            ON CONFLICT(pack_id) DO UPDATE SET
-                display_name = excluded.display_name,
-                origin = excluded.origin,
-                version = excluded.version,
-                default_mode = excluded.default_mode,
-                enabled = excluded.enabled,
-                source_path = excluded.source_path,
-                manifest_json = excluded.manifest_json,
-                content_hash = excluded.content_hash
-            """,
-            (
-                pack_id,
-                display_name,
-                version,
-                default_mode,
-                str(paths.root),
-                manifest_json,
-                content_hash,
-            ),
-        )
-
-        _clear_pack_rows(conn, pack_id)
-        _load_pack_fallbacks(conn, pack_id, manifest)
-        _load_pack_place_overrides(conn, pack_id, paths.place_overrides)
-        _load_pack_exonyms(conn, pack_id, paths.exonyms)
-
-        conn.execute(
-            """
-            INSERT INTO pack_build (pack_id, built_at, content_hash)
-            VALUES (?, ?, ?)
-            ON CONFLICT(pack_id) DO UPDATE SET
-                built_at = excluded.built_at,
-                content_hash = excluded.content_hash
-            """,
-            (
-                pack_id,
-                datetime.now(timezone.utc).isoformat(),
-                content_hash,
-            ),
-        )
+    _upsert_pack(conn, pack_id, manifest)
+    _upsert_pack_install(conn, pack_id, paths, content_hash)
+    _clear_pack_rows(conn, pack_id)
+    _load_pipeline_steps(conn, pack_id, manifest)
+    _load_entity_names(conn, pack_id, paths.entity_names)
+    _load_string_exonyms(conn, pack_id, paths.string_exonyms)
 
 
-def _clear_pack_rows(conn: sqlite3.Connection, pack_id: str) -> None:
-    conn.execute("DELETE FROM pack_fallback_step WHERE pack_id = ?", (pack_id,))
-    conn.execute("DELETE FROM pack_place_override WHERE pack_id = ?", (pack_id,))
-    conn.execute("DELETE FROM pack_exonym WHERE pack_id = ?", (pack_id,))
+# ---------------------------------------------------------------------------
+# Pack and install upserts
+# ---------------------------------------------------------------------------
 
 
-def _load_pack_fallbacks(
+def _upsert_pack(
     conn: sqlite3.Connection,
     pack_id: str,
     manifest: dict[str, Any],
 ) -> None:
-    fallbacks = manifest.get("fallbacks", [])
-    if fallbacks is None:
-        return
+    display_name = str(manifest["display_name"]).strip()
+    bcp47 = str(manifest["bcp47"]).strip()
+    version = str(manifest["version"]).strip()
+    kind = str(manifest.get("kind", "historical")).strip()
 
-    if not isinstance(fallbacks, list):
-        raise ValueError(f"Manifest fallbacks must be a list for pack {pack_id}")
+    # Derive default_mode from the first pipeline step when not explicit.
+    pipeline = manifest.get("pipeline") or []
+    default_mode = str(
+        manifest.get("default_mode")
+        or (pipeline[0].get("step", "lookup_first") if pipeline else "lookup_first")
+    ).strip()
+
+    manifest_json = json.dumps(manifest, ensure_ascii=False, sort_keys=True)
+
+    conn.execute(
+        """
+        INSERT INTO pack (
+            pack_id, display_name, bcp47, version, kind,
+            default_mode, manifest_json, enabled
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(pack_id) DO UPDATE SET
+            display_name  = excluded.display_name,
+            bcp47         = excluded.bcp47,
+            version       = excluded.version,
+            kind          = excluded.kind,
+            default_mode  = excluded.default_mode,
+            manifest_json = excluded.manifest_json,
+            enabled       = excluded.enabled
+        """,
+        (pack_id, display_name, bcp47, version, kind, default_mode, manifest_json),
+    )
+
+
+def _upsert_pack_install(
+    conn: sqlite3.Connection,
+    pack_id: str,
+    paths: BuiltinPackPaths,
+    content_hash: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO pack_install (pack_id, source_path, content_hash, built_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(pack_id) DO UPDATE SET
+            source_path  = excluded.source_path,
+            content_hash = excluded.content_hash,
+            built_at     = excluded.built_at
+        """,
+        (
+            pack_id,
+            str(paths.root),
+            content_hash,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Clear existing pack rows
+# ---------------------------------------------------------------------------
+
+
+def _clear_pack_rows(conn: sqlite3.Connection, pack_id: str) -> None:
+    conn.execute("DELETE FROM pack_pipeline_step WHERE pack_id = ?", (pack_id,))
+    conn.execute("DELETE FROM pack_entity_name   WHERE pack_id = ?", (pack_id,))
+    conn.execute("DELETE FROM pack_string_exonym WHERE pack_id = ?", (pack_id,))
+    conn.execute("DELETE FROM pack_import        WHERE pack_id = ?", (pack_id,))
+
+
+# ---------------------------------------------------------------------------
+# Pipeline steps
+# ---------------------------------------------------------------------------
+
+
+def _load_pipeline_steps(
+    conn: sqlite3.Connection,
+    pack_id: str,
+    manifest: dict[str, Any],
+) -> None:
+    pipeline = manifest.get("pipeline")
+    if not pipeline:
+        return
+    if not isinstance(pipeline, list):
+        raise ValueError(f"manifest 'pipeline' must be a list in pack {pack_id!r}")
 
     rows: list[tuple[Any, ...]] = []
 
-    for step_index, item in enumerate(fallbacks):
+    for step_index, item in enumerate(pipeline):
         if not isinstance(item, dict):
             raise ValueError(
-                f"Fallback step must be a mapping in pack {pack_id}: {item!r}"
+                f"Pipeline step must be a mapping in pack {pack_id!r}: {item!r}"
             )
 
-        step_type = str(item.get("type", "")).strip()
+        step_type = str(item.get("step", "")).strip()
         if not step_type:
-            raise ValueError(f"Fallback step missing 'type' in pack {pack_id}")
+            raise ValueError(
+                f"Pipeline step {step_index} missing 'step' key in pack {pack_id!r}"
+            )
 
-        # Generic target field for simple steps.
-        step_target = (
-            item.get("target")
-            or item.get("pack_id")
-            or item.get("source")
-            or item.get("language")
-        )
-        step_target_str = str(step_target).strip() if step_target is not None else None
+        enabled = 0 if item.get("enabled") is False else 1
 
         rows.append(
             (
                 pack_id,
                 step_index,
                 step_type,
-                step_target_str,
+                enabled,
                 json.dumps(item, ensure_ascii=False, sort_keys=True),
             )
         )
@@ -161,296 +201,407 @@ def _load_pack_fallbacks(
     if rows:
         conn.executemany(
             """
-            INSERT INTO pack_fallback_step (
-                pack_id,
-                step_index,
-                step_type,
-                step_target,
-                config_json
-            )
+            INSERT INTO pack_pipeline_step
+                (pack_id, step_index, step_type, enabled, config_json)
             VALUES (?, ?, ?, ?, ?)
             """,
             rows,
         )
 
 
-def _load_pack_place_overrides(
+# ---------------------------------------------------------------------------
+# Entity-anchored name mappings  (entity_names.tsv)
+# ---------------------------------------------------------------------------
+
+
+def _load_entity_names(
     conn: sqlite3.Connection,
     pack_id: str,
-    overrides_path: Path,
+    tsv_path: Path,
 ) -> None:
-    if not overrides_path.exists():
+    if not tsv_path.exists():
         return
 
-    with overrides_path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        fieldnames = set(reader.fieldnames or [])
-        missing = REQUIRED_OVERRIDE_COLUMNS - fieldnames
-        if missing:
-            raise ValueError(
-                f"place_overrides.tsv for pack {pack_id} is missing columns {sorted(missing)}"
-            )
+    import_id = _register_import(conn, pack_id, tsv_path)
 
-        rows: list[tuple[Any, ...]] = []
+    with tsv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(_strip_comments(f), delimiter="\t")
+        _check_columns(reader, REQUIRED_ENTITY_NAME_COLUMNS, tsv_path)
+
+        name_rows: list[tuple[Any, ...]] = []
+        tag_rows: list[tuple[Any, ...]] = []
+        prov_rows: list[tuple[Any, ...]] = []
 
         for line_no, raw in enumerate(reader, start=2):
             namespace = raw["namespace"].strip()
-            external_id = raw["external_id"].strip()
+            entity_id = raw["entity_id"].strip()
             output_name = raw["output_name"].strip()
-            valid_from = _clean_optional_date(
-                raw["valid_from"].strip(),
-                field="valid_from",
-                line_no=line_no,
-                file_path=overrides_path,
-            )
-            valid_to = _clean_optional_date(
-                raw["valid_to"].strip(),
-                field="valid_to",
-                line_no=line_no,
-                file_path=overrides_path,
-            )
-            priority = _parse_required_int(
-                raw["priority"].strip(),
-                field="priority",
-                line_no=line_no,
-                file_path=overrides_path,
-            )
-            tags = _clean_optional_text(raw["tags"])
-            note = _clean_optional_text(raw["note"])
+            valid_from = _clean_date(raw["valid_from"], "valid_from", line_no, tsv_path)
+            valid_to = _clean_date(raw["valid_to"], "valid_to", line_no, tsv_path)
+            priority = _parse_int(raw["priority"], "priority", line_no, tsv_path)
+            note = _clean_text(raw["note"])
+            tags = _parse_tags(raw["tags"])
 
-            if not namespace:
-                raise ValueError(f"{overrides_path}:{line_no} namespace is required")
-            if not external_id:
-                raise ValueError(f"{overrides_path}:{line_no} external_id is required")
-            if not output_name:
-                raise ValueError(f"{overrides_path}:{line_no} output_name is required")
+            _require_nonempty(namespace, "namespace", line_no, tsv_path)
+            _require_nonempty(entity_id, "entity_id", line_no, tsv_path)
+            _require_nonempty(output_name, "output_name", line_no, tsv_path)
+            _check_date_range(valid_from, valid_to, line_no, tsv_path)
 
-            _validate_date_range(
-                valid_from=valid_from,
-                valid_to=valid_to,
-                file_path=overrides_path,
-                line_no=line_no,
-            )
-
-            geonameid: int | None = None
+            # For GeoNames entities, validate the ID is known in the DB.
             if namespace == "geonames":
-                geonameid = _parse_required_int(
-                    external_id,
-                    field="external_id",
-                    line_no=line_no,
-                    file_path=overrides_path,
-                )
-                exists = conn.execute(
-                    "SELECT 1 FROM geoname WHERE geonameid = ?",
-                    (geonameid,),
-                ).fetchone()
-                if exists is None:
-                    raise ValueError(
-                        f"{overrides_path}:{line_no} references unknown geonameid {geonameid}"
-                    )
+                _validate_geonameid(conn, entity_id, line_no, tsv_path)
 
-            rows.append(
+            name_rows.append(
                 (
                     pack_id,
                     namespace,
-                    external_id,
-                    geonameid,
+                    entity_id,
                     output_name,
-                    _normalize_lookup_key(output_name),
                     valid_from,
                     valid_to,
                     priority,
-                    tags,
                     note,
-                    overrides_path.name,
+                )
+            )
+
+            for tag in tags:
+                tag_rows.append(
+                    (
+                        pack_id,
+                        namespace,
+                        entity_id,
+                        output_name,
+                        valid_from,
+                        valid_to,
+                        tag,
+                    )
+                )
+
+            prov_rows.append(
+                (
+                    pack_id,
+                    "pack_entity_name",
+                    _entity_name_pk_json(
+                        pack_id, namespace, entity_id, output_name, valid_from, valid_to
+                    ),
+                    import_id,
                     line_no,
                 )
             )
 
-        if rows:
-            conn.executemany(
-                """
-                INSERT INTO pack_place_override (
-                    pack_id,
-                    namespace,
-                    external_id,
-                    geonameid,
-                    output_name,
-                    output_name_normalized,
-                    valid_from,
-                    valid_to,
-                    priority,
-                    tags,
-                    note,
-                    source_file,
-                    source_line
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
+    if name_rows:
+        conn.executemany(
+            """
+            INSERT INTO pack_entity_name
+                (pack_id, namespace, entity_id, output_name,
+                 valid_from, valid_to, priority, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            name_rows,
+        )
+    if tag_rows:
+        conn.executemany(
+            """
+            INSERT INTO pack_entity_name_tag
+                (pack_id, namespace, entity_id, output_name,
+                 valid_from, valid_to, tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            tag_rows,
+        )
+    if prov_rows:
+        conn.executemany(
+            """
+            INSERT INTO pack_row_provenance
+                (pack_id, table_name, row_pk_json, import_id, source_line)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            prov_rows,
+        )
 
 
-def _load_pack_exonyms(
+# ---------------------------------------------------------------------------
+# String-anchored exonyms  (string_exonyms.tsv)
+# ---------------------------------------------------------------------------
+
+
+def _load_string_exonyms(
     conn: sqlite3.Connection,
     pack_id: str,
-    exonyms_path: Path,
+    tsv_path: Path,
 ) -> None:
-    if not exonyms_path.exists():
+    if not tsv_path.exists():
         return
 
-    with exonyms_path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        fieldnames = set(reader.fieldnames or [])
-        missing = REQUIRED_EXONYM_COLUMNS - fieldnames
-        if missing:
-            raise ValueError(
-                f"exonyms.tsv for pack {pack_id} is missing columns {sorted(missing)}"
-            )
+    import_id = _register_import(conn, pack_id, tsv_path)
 
-        rows: list[tuple[Any, ...]] = []
+    with tsv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(_strip_comments(f), delimiter="\t")
+        _check_columns(reader, REQUIRED_STRING_EXONYM_COLUMNS, tsv_path)
+
+        exonym_rows: list[tuple[Any, ...]] = []
+        prov_rows: list[tuple[Any, ...]] = []
 
         for line_no, raw in enumerate(reader, start=2):
-            input_normalized = _normalize_lookup_key(raw["input_normalized"])
+            # The TSV column is 'input' (raw form); we normalise on import.
+            input_normal = _normalise(raw["input"])
             output_name = raw["output_name"].strip()
-            valid_from = _clean_optional_date(
-                raw["valid_from"].strip(),
-                field="valid_from",
-                line_no=line_no,
-                file_path=exonyms_path,
-            )
-            valid_to = _clean_optional_date(
-                raw["valid_to"].strip(),
-                field="valid_to",
-                line_no=line_no,
-                file_path=exonyms_path,
-            )
-            priority = _parse_required_int(
-                raw["priority"].strip(),
-                field="priority",
-                line_no=line_no,
-                file_path=exonyms_path,
-            )
-            note = _clean_optional_text(raw["note"])
+            valid_from = _clean_date(raw["valid_from"], "valid_from", line_no, tsv_path)
+            valid_to = _clean_date(raw["valid_to"], "valid_to", line_no, tsv_path)
+            priority = _parse_int(raw["priority"], "priority", line_no, tsv_path)
+            note = _clean_text(raw["note"])
 
-            if not input_normalized:
-                raise ValueError(
-                    f"{exonyms_path}:{line_no} input_normalized is required"
-                )
-            if not output_name:
-                raise ValueError(f"{exonyms_path}:{line_no} output_name is required")
+            _require_nonempty(input_normal, "input", line_no, tsv_path)
+            _require_nonempty(output_name, "output_name", line_no, tsv_path)
+            _check_date_range(valid_from, valid_to, line_no, tsv_path)
 
-            _validate_date_range(
-                valid_from=valid_from,
-                valid_to=valid_to,
-                file_path=exonyms_path,
-                line_no=line_no,
-            )
-
-            rows.append(
+            exonym_rows.append(
                 (
                     pack_id,
-                    input_normalized,
+                    input_normal,
                     output_name,
-                    _normalize_lookup_key(output_name),
                     valid_from,
                     valid_to,
                     priority,
                     note,
-                    exonyms_path.name,
+                )
+            )
+
+            prov_rows.append(
+                (
+                    pack_id,
+                    "pack_string_exonym",
+                    _string_exonym_pk_json(
+                        pack_id, input_normal, output_name, valid_from, valid_to
+                    ),
+                    import_id,
                     line_no,
                 )
             )
 
-        if rows:
-            conn.executemany(
-                """
-                INSERT INTO pack_exonym (
-                    pack_id,
-                    input_normalized,
-                    output_name,
-                    output_name_normalized,
-                    valid_from,
-                    valid_to,
-                    priority,
-                    note,
-                    source_file,
-                    source_line
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
+    if exonym_rows:
+        conn.executemany(
+            """
+            INSERT INTO pack_string_exonym
+                (pack_id, input_normal, output_name,
+                 valid_from, valid_to, priority, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            exonym_rows,
+        )
+    if prov_rows:
+        conn.executemany(
+            """
+            INSERT INTO pack_row_provenance
+                (pack_id, table_name, row_pk_json, import_id, source_line)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            prov_rows,
+        )
 
 
-def _normalize_lookup_key(text: str) -> str:
+# ---------------------------------------------------------------------------
+# Provenance helpers
+# ---------------------------------------------------------------------------
+
+
+def _register_import(
+    conn: sqlite3.Connection,
+    pack_id: str,
+    source_path: Path,
+) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO pack_import (pack_id, source_file, imported_at)
+        VALUES (?, ?, ?)
+        """,
+        (pack_id, source_path.name, datetime.now(timezone.utc).isoformat()),
+    )
+    return cursor.lastrowid  # type: ignore[return-value]
+
+
+def _entity_name_pk_json(
+    pack_id: str,
+    namespace: str,
+    entity_id: str,
+    output_name: str,
+    valid_from: str | None,
+    valid_to: str | None,
+) -> str:
+    return json.dumps(
+        {
+            "pack_id": pack_id,
+            "namespace": namespace,
+            "entity_id": entity_id,
+            "output_name": output_name,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _string_exonym_pk_json(
+    pack_id: str,
+    input_normal: str,
+    output_name: str,
+    valid_from: str | None,
+    valid_to: str | None,
+) -> str:
+    return json.dumps(
+        {
+            "pack_id": pack_id,
+            "input_normal": input_normal,
+            "output_name": output_name,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GeoNames validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_geonameid(
+    conn: sqlite3.Connection,
+    entity_id: str,
+    line_no: int,
+    file_path: Path,
+) -> None:
+    try:
+        geonameid = int(entity_id)
+    except ValueError:
+        raise ValueError(
+            f"{file_path}:{line_no} entity_id for namespace 'geonames' must be "
+            f"an integer, got {entity_id!r}"
+        )
+
+    exists = conn.execute(
+        "SELECT 1 FROM geoname WHERE geonameid = ?",
+        (geonameid,),
+    ).fetchone()
+
+    if exists is None:
+        raise ValueError(
+            f"{file_path}:{line_no} references unknown geonameid {geonameid} "
+            "(not present in the geoname table — run geonames import first)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TSV helpers
+# ---------------------------------------------------------------------------
+
+
+def _strip_comments(lines: Any) -> StringIO:
+    """
+    Lets TSV files carry documentation
+    """
+    buf = StringIO()
+    for line in lines:
+        stripped = line.rstrip("\n")
+        if stripped.lstrip().startswith("#") or not stripped.strip():
+            continue
+        buf.write(stripped + "\n")
+    buf.seek(0)
+    return buf
+
+
+def _check_columns(
+    reader: csv.DictReader,
+    required: set[str],
+    file_path: Path,
+) -> None:
+    fieldnames = set(reader.fieldnames or [])
+    missing = required - fieldnames
+    if missing:
+        raise ValueError(f"{file_path} is missing required columns: {sorted(missing)}")
+
+
+def _parse_tags(value: str) -> list[str]:
+    """
+    Parse a comma-separated tag string into a sorted list of non-empty tokens
+    """
+    return sorted(t.strip().lower() for t in value.split(",") if t.strip())
+
+
+# ---------------------------------------------------------------------------
+# Value cleaners and validators
+# ---------------------------------------------------------------------------
+
+
+def _normalise(text: str) -> str:
+    """NFC-normalise, casefold, strip.  Applied to all lookup keys on import"""
     return unicodedata.normalize("NFC", text.strip()).casefold()
 
 
-def _clean_optional_text(value: str) -> str | None:
+def _clean_text(value: str) -> str | None:
     stripped = value.strip()
     return stripped if stripped else None
 
 
-def _clean_optional_date(
+def _clean_date(
     value: str,
-    *,
     field: str,
     line_no: int,
     file_path: Path,
 ) -> str | None:
-    if not value:
+    stripped = value.strip()
+    if not stripped:
         return None
-
-    if not PACK_DATE_RE.fullmatch(value):
+    if not PACK_DATE_RE.fullmatch(stripped):
         raise ValueError(
-            f"{file_path}:{line_no} invalid {field} {value!r}; "
-            "expected signed YYYY-MM-DD or YYYY-MM-DD"
+            f"{file_path}:{line_no} invalid {field} {stripped!r}; "
+            "expected (-)YYYY-MM-DD with a four-or-more digit year"
         )
+    return stripped
 
-    return value
 
-
-def _parse_required_int(
+def _parse_int(
     value: str,
-    *,
     field: str,
     line_no: int,
     file_path: Path,
 ) -> int:
     try:
-        return int(value)
-    except ValueError as exc:
+        return int(value.strip())
+    except ValueError:
         raise ValueError(
-            f"{file_path}:{line_no} invalid integer for {field}: {value!r}"
-        ) from exc
+            f"{file_path}:{line_no} invalid integer for {field!r}: {value!r}"
+        )
 
 
-def _validate_date_range(
-    *,
+def _require_nonempty(value: str, field: str, line_no: int, file_path: Path) -> None:
+    if not value:
+        raise ValueError(f"{file_path}:{line_no} {field!r} must not be empty")
+
+
+def _check_date_range(
     valid_from: str | None,
     valid_to: str | None,
-    file_path: Path,
     line_no: int,
+    file_path: Path,
 ) -> None:
     if valid_from is None or valid_to is None:
         return
-
-    from_key = _date_key(valid_from)
-    to_key = _date_key(valid_to)
-
-    if from_key > to_key:
+    if _date_key(valid_from) > _date_key(valid_to):
         raise ValueError(
-            f"{file_path}:{line_no} invalid range: valid_from {valid_from} > valid_to {valid_to}"
+            f"{file_path}:{line_no} invalid range: "
+            f"valid_from {valid_from} is after valid_to {valid_to}"
         )
 
 
 def _date_key(value: str) -> tuple[int, int, int]:
-    # Handles both "1066-09-15" and "-0660-01-01"
+    """
+    Return (year, month, day) as a sortable tuple.
+    Handles both '1066-09-15' and '-0660-01-01'.
+    """
     sign = -1 if value.startswith("-") else 1
     body = value[1:] if sign == -1 else value
-    year_str, month_str, day_str = body.split("-")
-    year = sign * int(year_str)
-    month = int(month_str)
-    day = int(day_str)
-    return (year, month, day)
+    y, m, d = body.split("-")
+    return (sign * int(y), int(m), int(d))
