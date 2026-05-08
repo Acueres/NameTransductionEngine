@@ -2,5 +2,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path.cwd()
 RAW_DIR_GEONAMES = PROJECT_ROOT / "data" / "raw" / "geonames"
-DB_PATH_GEONAMES = PROJECT_ROOT / "data" / "geonames.sqlite"
+RAW_DIR_WIKIDATA = PROJECT_ROOT / "data" / "raw" / "wikidata"
+DB_PATH_NAMES = PROJECT_ROOT / "data" / "names.sqlite"
 BUILTIN_PACKS_DIR=PROJECT_ROOT / "packs"

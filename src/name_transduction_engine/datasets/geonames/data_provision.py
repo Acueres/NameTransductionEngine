@@ -25,9 +25,6 @@ def ensure_geonames_sqlite(db_path: Path, force_download=False) -> Path:
 
     print("GeoNames DB missing or invalid. Rebuilding from scratch...")
 
-    if db_path.exists():
-        db_path.unlink()
-
     download_geonames_data(force_download)
 
     conn = sqlite3.connect(db_path)
@@ -41,8 +38,6 @@ def ensure_geonames_sqlite(db_path: Path, force_download=False) -> Path:
     except Exception:
         conn.rollback()
         conn.close()
-        if db_path.exists():
-            db_path.unlink()
         raise
     finally:
         try:
@@ -51,8 +46,6 @@ def ensure_geonames_sqlite(db_path: Path, force_download=False) -> Path:
             pass
 
     if not database_is_ready(db_path):
-        if db_path.exists():
-            db_path.unlink()
         raise RuntimeError("GeoNames DB build finished, but validation failed.")
 
     print(f"GeoNames DB built successfully: {db_path}")
