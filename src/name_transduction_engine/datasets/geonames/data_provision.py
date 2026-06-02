@@ -2,36 +2,32 @@ import sqlite3
 
 from pathlib import Path
 from .download import download_geonames_data
-from .schema import create_schema
+from .schema import create_schema, build_indexes
 from .load import (
-    database_is_ready,
+    is_geonames_ready,
     configure_connection,
     load_all_data,
     write_build_metadata,
 )
 
 
-def ensure_geonames_sqlite(db_path: Path, force_download=False) -> Path:
-    """
-    Create or validate the local GeoNames SQLite database.
-
-    If the DB is missing or invalid, rebuild it from scratch.
-    """
+def ensure_geonames_sqlite(db_path: Path, force=False) -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if database_is_ready(db_path):
-        print(f"GeoNames DB is ready: {db_path}")
+    if not force and is_geonames_ready(db_path):
+        print(f"GeoNames is ready: {db_path}")
         return db_path
 
-    print("GeoNames DB missing or invalid. Rebuilding from scratch...")
+    print("GeoNames missing or invalid. Rebuilding from scratch...")
 
-    download_geonames_data(force_download)
+    download_geonames_data(force)
 
     conn = sqlite3.connect(db_path)
     try:
         configure_connection(conn)
         create_schema(conn)
         load_all_data(conn)
+        build_indexes(conn)
         write_build_metadata(conn)
 
         conn.commit()
@@ -45,8 +41,8 @@ def ensure_geonames_sqlite(db_path: Path, force_download=False) -> Path:
         except Exception:
             pass
 
-    if not database_is_ready(db_path):
-        raise RuntimeError("GeoNames DB build finished, but validation failed.")
+    if not is_geonames_ready(db_path):
+        raise RuntimeError("GeoNames build finished, but validation failed.")
 
-    print(f"GeoNames DB built successfully: {db_path}")
+    print(f"GeoNames built successfully: {db_path}")
     return db_path

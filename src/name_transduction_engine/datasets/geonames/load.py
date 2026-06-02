@@ -7,7 +7,6 @@ from pathlib import Path
 from zipfile import ZipFile
 from name_transduction_engine.paths import RAW_DIR_GEONAMES
 
-
 SPECIAL_ISOLANGUAGE = {
     "link",  # website link, mostly wikipedia
     "wkdt",  # wikidata id
@@ -57,6 +56,8 @@ GEONAME_KEEP_COLUMNS = [
     "geonameid",
     "name",
     "asciiname",
+    "latitude",
+    "longitude",
     "country_code",
     "admin1_code",
     "admin2_code",
@@ -116,14 +117,14 @@ def configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA temp_store = MEMORY;")
 
 
-def database_is_ready(db_path: Path) -> bool:
+def is_geonames_ready(db_path: Path) -> bool:
     if not db_path.exists():
         return False
 
     try:
         conn = sqlite3.connect(db_path)
         try:
-            # 1. Required tables exist.
+            # Required tables exist
             existing_tables = {
                 row[0]
                 for row in conn.execute(
@@ -134,7 +135,7 @@ def database_is_ready(db_path: Path) -> bool:
             if not REQUIRED_TABLE_COLUMNS.keys() <= existing_tables:
                 return False
 
-            # 2. Required columns exist.
+            # Required columns exist
             for table_name, expected_columns in REQUIRED_TABLE_COLUMNS.items():
                 actual_columns = {
                     row[1] for row in conn.execute(f"PRAGMA table_info({table_name});")
@@ -142,7 +143,7 @@ def database_is_ready(db_path: Path) -> bool:
                 if not expected_columns <= actual_columns:
                     return False
 
-            # 3. Required tables are populated.
+            # Required tables are populated
             for table_name in REQUIRED_POPULATED_TABLES:
                 row_count = conn.execute(
                     f"SELECT COUNT(*) FROM {table_name};"
@@ -178,6 +179,8 @@ def _load_geoname_table(
             geonameid,
             name,
             asciiname,
+            latitude,
+            longitude,
             country_code,
             admin1_code,
             admin2_code,
@@ -185,7 +188,7 @@ def _load_geoname_table(
             feature_code,
             population
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     batch: list[tuple] = []
@@ -209,12 +212,14 @@ def _load_geoname_table(
                     _to_int(values[0]),  # geonameid
                     _empty_to_none(values[1]),
                     _empty_to_none(values[2]),
-                    _empty_to_none(values[3]),
-                    _empty_to_none(values[4]),
+                    _to_float(values[3]),
+                    _to_float(values[4]),
                     _empty_to_none(values[5]),
                     _empty_to_none(values[6]),
                     _empty_to_none(values[7]),
-                    _to_int(values[8]),  # population
+                    _empty_to_none(values[8]),
+                    _empty_to_none(values[9]),
+                    _to_int(values[10]),  # population
                 )
 
                 batch.append(record)
@@ -321,7 +326,6 @@ def _load_language_code_table(
             if not row:
                 continue
 
-            # Skip header row if present.
             if "Language Name" in row:
                 continue
 
@@ -415,3 +419,10 @@ def _to_int(value: str) -> int | None:
     if not stripped:
         return None
     return int(stripped)
+
+
+def _to_float(value: str) -> float | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return float(stripped)

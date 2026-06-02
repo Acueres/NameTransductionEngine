@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Final
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from name_transduction_engine.paths import WIKIDATA_RAW_DUMP_PATH
 
-OUTPUT_DIRECTORY: Final[Path] = Path("./data/raw/wikidata")
 WIKIDATA_URL: Final[str] = (
     "https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2"
 )
@@ -123,27 +123,29 @@ def _same_remote_file(old_meta: dict | None, info: RemoteFileInfo) -> bool:
     return True
 
 
-def download_wikidata(force: bool = False) -> Path:
+def download_wikidata_raw(force: bool = False) -> Path:
     print("Wikidata download started.")
-    OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    WIKIDATA_RAW_DUMP_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    filename = WIKIDATA_URL.rsplit("/", 1)[-1]
-    output_path = OUTPUT_DIRECTORY / filename
-    part_path = output_path.with_suffix(output_path.suffix + ".part")
-    meta_path = output_path.with_suffix(output_path.suffix + ".meta.json")
+    part_path = WIKIDATA_RAW_DUMP_PATH.with_suffix(
+        WIKIDATA_RAW_DUMP_PATH.suffix + ".part"
+    )
+    meta_path = WIKIDATA_RAW_DUMP_PATH.with_suffix(
+        WIKIDATA_RAW_DUMP_PATH.suffix + ".meta.json"
+    )
 
     with _build_session() as session:
         info = _probe_remote_file(session=session, url=WIKIDATA_URL)
 
-        if output_path.exists() and not force:
-            local_size = output_path.stat().st_size
+        if WIKIDATA_RAW_DUMP_PATH.exists() and not force:
+            local_size = WIKIDATA_RAW_DUMP_PATH.stat().st_size
             if info.size is None or local_size == info.size:
-                print(f"Wikidata already downloaded: {output_path.name}")
-                return output_path
+                print(f"Wikidata already downloaded: {WIKIDATA_RAW_DUMP_PATH.name}")
+                return WIKIDATA_RAW_DUMP_PATH
 
         if force:
-            if output_path.exists():
-                output_path.unlink()
+            if WIKIDATA_RAW_DUMP_PATH.exists():
+                WIKIDATA_RAW_DUMP_PATH.unlink()
             if part_path.exists():
                 part_path.unlink()
             if meta_path.exists():
@@ -154,13 +156,13 @@ def download_wikidata(force: bool = False) -> Path:
         _download_with_resume(
             session=session,
             info=info,
-            output_path=output_path,
+            output_path=WIKIDATA_RAW_DUMP_PATH,
             part_path=part_path,
             meta_path=meta_path,
         )
 
     print("Wikidata download finished.")
-    return output_path
+    return WIKIDATA_RAW_DUMP_PATH
 
 
 def _print_progress(message: str, width: int = 120) -> None:

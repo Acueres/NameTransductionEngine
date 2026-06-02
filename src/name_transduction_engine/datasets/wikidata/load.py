@@ -9,11 +9,8 @@ import orjson
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
-
-from name_transduction_engine.paths import RAW_DIR_WIKIDATA
-
-RAW_DUMP_PATH = RAW_DIR_WIKIDATA / "latest-all.json.bz2"
-LOCATIONS_DATASET_PATH = RAW_DIR_WIKIDATA / "wikidata_locations.jsonl.gz"
+from .download import download_wikidata_locations_data
+from name_transduction_engine.paths import RAW_DIR_WIKIDATA, WIKIDATA_LOCATIONS_PATH, WIKIDATA_RAW_DUMP_PATH
 
 LOCATION_CLASS_QIDS = {
     "Q6256": "country",
@@ -115,37 +112,33 @@ REQUIRED_TABLES = {
 }
 
 
-def ensure_locations_dataset(raw_dump_path: Path, force: bool) -> Path:
+def ensure_locations_dataset(force: bool) -> Path:
     RAW_DIR_WIKIDATA.mkdir(parents=True, exist_ok=True)
 
-    jsonl_part_path, gzip_part_path = _dataset_part_paths(LOCATIONS_DATASET_PATH)
+    jsonl_part_path, gzip_part_path = _dataset_part_paths(WIKIDATA_LOCATIONS_PATH)
 
-    if LOCATIONS_DATASET_PATH.exists() and not force:
-        return LOCATIONS_DATASET_PATH
+    if WIKIDATA_LOCATIONS_PATH.exists() and not force:
+        return WIKIDATA_LOCATIONS_PATH
 
     if force:
-        for path in (LOCATIONS_DATASET_PATH, jsonl_part_path, gzip_part_path):
+        for path in (WIKIDATA_LOCATIONS_PATH, jsonl_part_path, gzip_part_path):
             if path.exists():
                 path.unlink()
 
     if jsonl_part_path.exists():
         print(f"Using existing partial Wikidata locations file: {jsonl_part_path}")
         _finish_locations_dataset(
-            jsonl_part_path, gzip_part_path, LOCATIONS_DATASET_PATH
+            jsonl_part_path, gzip_part_path, WIKIDATA_LOCATIONS_PATH
         )
-        return LOCATIONS_DATASET_PATH
+        return WIKIDATA_LOCATIONS_PATH
 
-    if raw_dump_path.exists():
-        _build_locations_dataset(raw_dump_path, LOCATIONS_DATASET_PATH)
-        return LOCATIONS_DATASET_PATH
-
-    return _fetch_locations_dataset(LOCATIONS_DATASET_PATH)
+    download_wikidata_locations_data(force)
+    return WIKIDATA_LOCATIONS_PATH
 
 
-def _fetch_locations_dataset(output_path: Path) -> Path:
-    raise NotImplementedError(
-        "Fetching hosted wikidata_locations.jsonl.gz is not implemented yet."
-    )
+def build_compact_dataset() -> None:
+    if WIKIDATA_RAW_DUMP_PATH.exists():
+        _build_locations_dataset(WIKIDATA_RAW_DUMP_PATH, WIKIDATA_LOCATIONS_PATH)
 
 
 def _dataset_part_paths(output_path: Path) -> tuple[Path, Path]:
@@ -263,7 +256,6 @@ def load_locations_dataset(
     lang_rows = []
     name_rows = []
     seen_langs = set()
-    loaded = 0
 
     print("Loading Wikidata locations dataset...")
 
@@ -315,10 +307,6 @@ def load_locations_dataset(
                         name.get("term_type", "label"),
                     )
                 )
-
-            loaded += 1
-            if loaded % 100_000 == 0:
-                print(f"Prepared {loaded:,} Wikidata location records...")
 
             if len(location_rows) >= batch_size or len(name_rows) >= batch_size:
                 _flush_batches(
@@ -590,7 +578,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return out
 
 
-def database_is_ready(db_path: Path) -> bool:
+def is_wikidata_ready(db_path: Path) -> bool:
     if not db_path.exists():
         return False
 

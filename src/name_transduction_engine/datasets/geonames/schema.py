@@ -2,8 +2,7 @@ import sqlite3
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
+    conn.executescript("""
         DROP TABLE IF EXISTS alternate_name;
         DROP TABLE IF EXISTS geoname;
         DROP TABLE IF EXISTS language_code;
@@ -13,6 +12,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             geonameid       INTEGER PRIMARY KEY,
             name            TEXT NOT NULL,
             asciiname       TEXT,
+            latitude        REAL,
+            longitude      REAL,
             country_code    TEXT,
             admin1_code     TEXT,
             admin2_code     TEXT,
@@ -49,7 +50,11 @@ def create_schema(conn: sqlite3.Connection) -> None:
             key     TEXT PRIMARY KEY,
             value   TEXT NOT NULL
         );
+        """)
 
+
+def build_indexes(conn: sqlite3.Connection) -> None:
+    conn.executescript("""
         CREATE INDEX idx_geoname_country_code
             ON geoname(country_code);
 
@@ -58,6 +63,12 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX idx_geoname_population
             ON geoname(population);
+                       
+        CREATE INDEX idx_geoname_coordinates
+            ON geoname(latitude, longitude);
+                       
+        CREATE INDEX idx_geoname_country_feature_coordinates
+            ON geoname(country_code, feature_class, feature_code, latitude, longitude);
 
         CREATE INDEX idx_alt_geonameid
             ON alternate_name(geonameid);
@@ -80,5 +91,4 @@ def create_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_alt_lookup_candidates
             ON alternate_name(isolanguage, normalized_name, geonameid)
             WHERE row_kind IN ('name_lang', 'name_untyped');
-        """
-    )
+        """)
