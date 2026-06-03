@@ -369,7 +369,7 @@ wheels = [
 [[package]]
 name = "name-transduction-engine"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "langcodes" },
     { name = "matplotlib" },
@@ -379,15 +379,24 @@ dependencies = [
     { name = "requests" },
 ]
 
+[package.optional-dependencies]
+analysis = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "langcodes", specifier = ">=3.5.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
+    { name = "matplotlib", marker = "extra == 'analysis'", specifier = ">=3.10.9" },
     { name = "orjson", specifier = ">=3.11.8" },
     { name = "pandas", specifier = ">=3.0.1" },
+    { name = "pandas", marker = "extra == 'analysis'", specifier = ">=3.0.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.33.0" },
 ]
+provides-extras = ["analysis"]
 
 [[package]]
 name = "numpy"

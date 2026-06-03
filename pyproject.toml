@@ -1,14 +1,37 @@
 [project]
 name = "name-transduction-engine"
 version = "0.1.0"
-description = "Add your description here"
+description = "A name transduction engine for culture-specific place names"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langcodes>=3.5.1",
-    "matplotlib>=3.10.9",
     "orjson>=3.11.8",
-    "pandas>=3.0.1",
     "pyyaml>=6.0.3",
     "requests>=2.33.0",
+    "matplotlib>=3.10.9",
+    "pandas>=3.0.1",
 ]
+
+[project.scripts]
+nte = "name_transduction_engine.main:main"
+nte-clone-mcn = "name_transduction_engine.tools.clone_mcn:main"
+
+[project.optional-dependencies]
+analysis = [
+    "matplotlib>=3.10.9",
+    "pandas>=3.0.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+package = true
