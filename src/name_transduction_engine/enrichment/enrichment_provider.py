@@ -5,10 +5,13 @@ import yaml
 from pathlib import Path
 from typing import Any
 
-from name_transduction_engine.enrichment.packs.resolver import BuiltinPackPaths, discover_builtin_packs
+from name_transduction_engine.enrichment.packs.resolver import (
+    BuiltinPackPaths,
+    discover_builtin_packs,
+)
 from name_transduction_engine.enrichment.packs.schema import create_pack_schema
 from name_transduction_engine.enrichment.packs.compiler import rebuild_builtin_pack
-
+from name_transduction_engine.paths import DB_PATH, BUILTIN_PACKS_DIR
 
 REQUIRED_MANIFEST_KEYS = {"id", "display_name", "version", "bcp47", "kind"}
 
@@ -68,10 +71,7 @@ def _pack_is_current(
     return bool(row and row["content_hash"] == content_hash)
 
 
-def ensure_builtin_pack_enrichment(
-    db_path: Path,
-    builtin_packs_dir: Path,
-) -> Path:
+def ensure_builtin_pack_enrichment() -> None:
     """
     Ensure pack-scoped enrichment tables exist and are populated from all
     built-in packs found under builtin_packs_dir.
@@ -82,14 +82,14 @@ def ensure_builtin_pack_enrichment(
     The DB at db_path must already exist and contain the GeoNames tables
     (geoname, alternate_name), as entity_names.tsv validation queries them.
     """
-    if not db_path.exists():
-        raise FileNotFoundError(f"SQLite DB does not exist yet: {db_path}")
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"SQLite DB does not exist yet: {DB_PATH}")
 
-    pack_paths = discover_builtin_packs(builtin_packs_dir)
+    pack_paths = discover_builtin_packs(BUILTIN_PACKS_DIR)
     if not pack_paths:
-        raise RuntimeError(f"No built-in packs found in {builtin_packs_dir}")
+        raise RuntimeError(f"No built-in packs found in {BUILTIN_PACKS_DIR}")
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
     try:
@@ -121,5 +121,3 @@ def ensure_builtin_pack_enrichment(
 
     finally:
         conn.close()
-
-    return db_path

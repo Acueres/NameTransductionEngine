@@ -11,7 +11,7 @@ from urllib3.util.retry import Retry
 from name_transduction_engine.paths import WIKIDATA_RAW_DUMP_PATH
 
 WIKIDATA_URL: Final[str] = (
-    "https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2"
+    "http://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2"
 )
 CHUNK_SIZE: Final[int] = 8 * 1024 * 1024  # 8 MiB
 

@@ -4,7 +4,7 @@ from name_transduction_engine.datasets.shared import get_and_save_file, build_se
 from name_transduction_engine.paths import WIKIDATA_LOCATIONS_PATH
 
 WIKIDATA_LOCATIONS_URL: Final[str] = (
-    "https://github.com/Acueres/NameTransductionEngine/releases/download/data/wikidata_locations.jsonl.gz"
+    "http://github.com/Acueres/NameTransductionEngine/releases/download/data/wikidata_locations.jsonl.gz"
 )
 
 
