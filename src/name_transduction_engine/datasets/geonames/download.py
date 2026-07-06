@@ -12,7 +12,7 @@ GEONAMES_URLS: Final[dict[str, str]] = {
 }
 
 
-def download_geonames_data(force: bool = False) -> list[Path]:
+def download_geonames_data(force: bool = False) -> None:
     print("GeoNames download started.")
     RAW_DIR_GEONAMES.mkdir(parents=True, exist_ok=True)
 
@@ -36,4 +36,3 @@ def download_geonames_data(force: bool = False) -> list[Path]:
             downloaded_files.append(downloaded_path)
 
     print("GeoNames download finished.")
-    return downloaded_files

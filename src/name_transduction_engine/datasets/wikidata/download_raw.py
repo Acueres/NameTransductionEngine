@@ -123,7 +123,7 @@ def _same_remote_file(old_meta: dict | None, info: RemoteFileInfo) -> bool:
     return True
 
 
-def download_wikidata_raw(force: bool = False) -> Path:
+def download_wikidata_raw(force: bool = False) -> None:
     print("Wikidata download started.")
     WIKIDATA_RAW_DUMP_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -141,7 +141,7 @@ def download_wikidata_raw(force: bool = False) -> Path:
             local_size = WIKIDATA_RAW_DUMP_PATH.stat().st_size
             if info.size is None or local_size == info.size:
                 print(f"Wikidata already downloaded: {WIKIDATA_RAW_DUMP_PATH.name}")
-                return WIKIDATA_RAW_DUMP_PATH
+                return
 
         if force:
             if WIKIDATA_RAW_DUMP_PATH.exists():
@@ -162,7 +162,6 @@ def download_wikidata_raw(force: bool = False) -> Path:
         )
 
     print("Wikidata download finished.")
-    return WIKIDATA_RAW_DUMP_PATH
 
 
 def _print_progress(message: str, width: int = 120) -> None:

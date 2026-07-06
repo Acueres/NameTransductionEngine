@@ -10,7 +10,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 from .download import download_wikidata_locations_data
-from name_transduction_engine.paths import RAW_DIR_WIKIDATA, WIKIDATA_LOCATIONS_PATH, WIKIDATA_RAW_DUMP_PATH
+from name_transduction_engine.paths import (
+    RAW_DIR_WIKIDATA,
+    WIKIDATA_LOCATIONS_PATH,
+    WIKIDATA_RAW_DUMP_PATH,
+)
 
 LOCATION_CLASS_QIDS = {
     "Q6256": "country",
@@ -115,20 +119,24 @@ REQUIRED_TABLES = {
 def ensure_locations_dataset(force: bool) -> Path:
     RAW_DIR_WIKIDATA.mkdir(parents=True, exist_ok=True)
 
-    jsonl_part_path, gzip_part_path = _dataset_part_paths(WIKIDATA_LOCATIONS_PATH)
+    wikidata_locations_path, gzip_part_path = _dataset_part_paths(
+        WIKIDATA_LOCATIONS_PATH
+    )
 
     if WIKIDATA_LOCATIONS_PATH.exists() and not force:
         return WIKIDATA_LOCATIONS_PATH
 
     if force:
-        for path in (WIKIDATA_LOCATIONS_PATH, jsonl_part_path, gzip_part_path):
+        for path in (WIKIDATA_LOCATIONS_PATH, wikidata_locations_path, gzip_part_path):
             if path.exists():
                 path.unlink()
 
-    if jsonl_part_path.exists():
-        print(f"Using existing partial Wikidata locations file: {jsonl_part_path}")
+    if wikidata_locations_path.exists():
+        print(
+            f"Using existing partial Wikidata locations file: {wikidata_locations_path}"
+        )
         _finish_locations_dataset(
-            jsonl_part_path, gzip_part_path, WIKIDATA_LOCATIONS_PATH
+            wikidata_locations_path, gzip_part_path, WIKIDATA_LOCATIONS_PATH
         )
         return WIKIDATA_LOCATIONS_PATH
 
@@ -136,9 +144,14 @@ def ensure_locations_dataset(force: bool) -> Path:
     return WIKIDATA_LOCATIONS_PATH
 
 
-def build_compact_dataset() -> None:
-    if WIKIDATA_RAW_DUMP_PATH.exists():
-        _build_locations_dataset(WIKIDATA_RAW_DUMP_PATH, WIKIDATA_LOCATIONS_PATH)
+def build_wikidata_compact_dataset() -> None:
+    if not WIKIDATA_RAW_DUMP_PATH.exists():
+        raise FileNotFoundError(
+            f"Raw Wikidata dump not found: {WIKIDATA_RAW_DUMP_PATH}. "
+            "Run `nte data fetch wikidata-raw` first."
+        )
+
+    _build_locations_dataset(WIKIDATA_RAW_DUMP_PATH, WIKIDATA_LOCATIONS_PATH)
 
 
 def _dataset_part_paths(output_path: Path) -> tuple[Path, Path]:

@@ -1,13 +1,13 @@
-from name_transduction_engine.datasets.dataset_provider import ensure_datasets
-from name_transduction_engine.enrichment.enrichment_provider import (
-    ensure_builtin_pack_enrichment,
-)
+import sys
+
+from name_transduction_engine.cli import build_parser
 
 
-def main():
-    ensure_datasets()
-    ensure_builtin_pack_enrichment()
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

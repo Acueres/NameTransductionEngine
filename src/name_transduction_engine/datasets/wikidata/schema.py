@@ -3,11 +3,11 @@ import sqlite3
 
 def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
-        DROP TABLE IF EXISTS wikidata_location;
-        DROP TABLE IF EXISTS wikidata_location_geonames;
-        DROP TABLE IF EXISTS wikidata_location_p31;
-        DROP TABLE IF EXISTS wikidata_lang_norm;
         DROP TABLE IF EXISTS wikidata_location_name;
+        DROP TABLE IF EXISTS wikidata_location_p31;
+        DROP TABLE IF EXISTS wikidata_location_geonames;
+        DROP TABLE IF EXISTS wikidata_lang_norm;
+        DROP TABLE IF EXISTS wikidata_location;
 
         CREATE TABLE wikidata_location (
             qid TEXT PRIMARY KEY,

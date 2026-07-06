@@ -12,7 +12,7 @@ def build_session(*, use_env_proxy: bool = False) -> requests.Session:
     session.headers.update(
         {
             "User-Agent": (
-                "NameTransductionEngine/0.1 " "(GeoNames dataset bootstrap)"
+                "NameTransductionEngine/0.1 " "(dataset bootstrap)"
             ),
             "Accept": "*/*",
             "Accept-Encoding": "identity",

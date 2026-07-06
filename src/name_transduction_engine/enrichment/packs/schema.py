@@ -52,8 +52,8 @@ def create_pack_schema(conn: sqlite3.Connection) -> None:
             entity_id           TEXT    NOT NULL,
             output_name         TEXT    NOT NULL,
             output_name_normal  TEXT    GENERATED ALWAYS AS (lower(output_name)) STORED,
-            valid_from          TEXT,
-            valid_to            TEXT,
+            valid_from          TEXT    NOT NULL,
+            valid_to            TEXT    NOT NULL,
             priority            INTEGER NOT NULL DEFAULT 100,
             note                TEXT,
             PRIMARY KEY (pack_id, namespace, entity_id, output_name, valid_from, valid_to)

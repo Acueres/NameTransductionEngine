@@ -9,20 +9,21 @@ from .load import (
     load_all_data,
     write_build_metadata,
 )
+from name_transduction_engine.paths import DB_PATH
 
 
-def ensure_geonames_sqlite(db_path: Path, force=False) -> Path:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def ensure_geonames_sqlite(force=False) -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    if not force and is_geonames_ready(db_path):
-        print(f"GeoNames is ready: {db_path}")
-        return db_path
+    if not force and is_geonames_ready(DB_PATH):
+        print(f"GeoNames is ready: {DB_PATH}")
+        return
 
     print("GeoNames missing or invalid. Rebuilding from scratch...")
 
     download_geonames_data(force)
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(DB_PATH)
     try:
         configure_connection(conn)
         create_schema(conn)
@@ -41,8 +42,7 @@ def ensure_geonames_sqlite(db_path: Path, force=False) -> Path:
         except Exception:
             pass
 
-    if not is_geonames_ready(db_path):
+    if not is_geonames_ready(DB_PATH):
         raise RuntimeError("GeoNames build finished, but validation failed.")
 
-    print(f"GeoNames built successfully: {db_path}")
-    return db_path
+    print(f"GeoNames built successfully: {DB_PATH}")
