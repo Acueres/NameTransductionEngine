@@ -9,6 +9,12 @@ from name_transduction_engine.datasets.dataset_provider import (
 from name_transduction_engine.enrichment.enrichment_provider import (
     ensure_builtin_pack_enrichment,
 )
+from name_transduction_engine.datasets.maintenance import (
+    collect_data_status,
+    format_data_status,
+    clean_data,
+    format_clean_report,
+)
 
 # --------------------------------------------------------------------------- #
 # Command handlers
@@ -39,18 +45,17 @@ def cmd_data_build(args: argparse.Namespace) -> int:
 
 
 def cmd_data_status(args: argparse.Namespace) -> int:
-    # TODO: report which DBs exist, validity (database_is_ready), row counts
-    print("[data status] would report DB presence, validity, row counts")
+    print(format_data_status(collect_data_status()))
     return 0
 
 
 def cmd_data_clean(args: argparse.Namespace) -> int:
-    # TODO: remove .part files; optionally raw dumps if --raw given
-    print(f"[data clean] include_raw={args.raw}")
+    report = clean_data(include_raw=args.raw, preview=args.preview)
+    print(format_clean_report(report))
     return 0
 
 
-def cmd_transduce(args: argparse.Namespace) -> int:
+def cmd_convert(args: argparse.Namespace) -> int:
     if not args.name.strip():
         print("error: name is empty", file=sys.stderr)
         return 1
@@ -135,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument(
         "--raw", action="store_true", help="also delete downloaded raw dumps"
     )
+    p_clean.add_argument(
+        "--preview",
+        action="store_true",
+        help="show what would be removed without deleting",
+    )
     p_clean.set_defaults(func=cmd_data_clean)
 
     # Transduction
@@ -152,12 +162,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LANG",
         help="source language/script code (optional)",
     )
-    p_convert.add_argument("--mode", choices=["strict", "lookup", "adapt"], default="lookup")
+    p_convert.add_argument(
+        "--mode", choices=["strict", "lookup", "adapt"], default="lookup"
+    )
     p_convert.add_argument(
         "--topk", type=int, default=1, help="number of ranked candidates to return"
     )
-    p_convert.add_argument("--json", action="store_true", help="emit machine-readable JSON")
-    p_convert.set_defaults(func=cmd_transduce)
+    p_convert.add_argument(
+        "--json", action="store_true", help="emit machine-readable JSON"
+    )
+    p_convert.set_defaults(func=cmd_convert)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")

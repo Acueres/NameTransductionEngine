@@ -107,7 +107,7 @@ REQUIRED_TABLE_COLUMNS = {
     },
 }
 
-REQUIRED_POPULATED_TABLES = ("geoname", "alternate_name", "language_code")
+REQUIRED_POPULATED_TABLES = ("geoname", "alternate_name", "language_code", "build_metadata")
 
 
 def configure_connection(conn: sqlite3.Connection) -> None:
