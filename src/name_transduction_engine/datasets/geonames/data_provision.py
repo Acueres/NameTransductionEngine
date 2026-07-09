@@ -1,6 +1,5 @@
 import sqlite3
 
-from pathlib import Path
 from .download import download_geonames_data
 from .schema import create_schema, build_indexes
 from .load import (
@@ -10,6 +9,10 @@ from .load import (
     write_build_metadata,
 )
 from name_transduction_engine.paths import DB_PATH
+
+__all__ = [
+    "ensure_geonames_sqlite",
+]
 
 
 def ensure_geonames_sqlite(force=False) -> None:

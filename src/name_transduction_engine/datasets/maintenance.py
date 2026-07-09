@@ -7,6 +7,7 @@ from name_transduction_engine.paths import (
     DB_PATH,
     RAW_DIR_GEONAMES,
     RAW_DIR_WIKIDATA,
+    BUILD_DIR,
     WIKIDATA_LOCATIONS_PATH,
     WIKIDATA_RAW_DUMP_PATH,
 )
@@ -189,7 +190,7 @@ def format_data_status(status: DataStatus) -> str:
 class CleanReport:
     removed: list[ArtifactStatus] = field(default_factory=list)
     freed_bytes: int = 0
-    dry_run: bool = False
+    preview: bool = False
 
 
 def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
@@ -204,14 +205,14 @@ def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
     """
     targets: list[Path] = []
 
-    for raw_dir in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA):
-        if not raw_dir.is_dir():
+    # .part cleanup
+    for d in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA, BUILD_DIR):
+        if not d.is_dir():
             continue
 
-        targets.extend(sorted(raw_dir.glob("*.part")))
+        targets.extend(sorted(d.glob("*.part")))
 
-        # Resume metadata cleanup
-        for meta_path in sorted(raw_dir.glob("*.meta.json")):
+        for meta_path in sorted(d.glob("*.meta.json")):
             final_path = meta_path.with_name(meta_path.name.removesuffix(".meta.json"))
             part_path = final_path.with_suffix(final_path.suffix + ".part")
             final_will_remain = final_path.exists() and not include_raw
@@ -219,11 +220,16 @@ def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
             if not final_will_remain and not part_will_remain:
                 targets.append(meta_path)
 
+    # raw cleanup
+    for d in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA):
+        if not d.is_dir():
+            continue
+
         if include_raw:
             targets.extend(
                 sorted(
                     path
-                    for path in raw_dir.iterdir()
+                    for path in d.iterdir()
                     if path.is_file()
                     and path.suffix != ".part"
                     and not path.name.endswith(".meta.json")
@@ -244,12 +250,12 @@ def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
         )
         freed += size
 
-    return CleanReport(removed=removed, freed_bytes=freed, dry_run=preview)
+    return CleanReport(removed=removed, freed_bytes=freed, preview=preview)
 
 
 def format_clean_report(report: CleanReport) -> str:
     """Render a CleanReport as a human-readable summary"""
-    verb = "Would remove" if report.dry_run else "Removed"
+    verb = "Would remove" if report.preview else "Removed"
 
     if not report.removed:
         return "Nothing to clean."

@@ -5,6 +5,13 @@ from .wikidata.data_provision import (
     build_wikidata_compact_dataset,
 )
 
+__all__ = [
+    "ensure_geonames_sqlite",
+    "download_wikidata_raw",
+    "ensure_wikidata_sqlite",
+    "build_wikidata_compact_dataset",
+]
+
 
 def ensure_datasets(force=False):
     ensure_geonames_sqlite(force)

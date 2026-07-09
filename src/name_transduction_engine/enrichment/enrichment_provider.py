@@ -13,6 +13,10 @@ from name_transduction_engine.enrichment.packs.schema import create_pack_schema
 from name_transduction_engine.enrichment.packs.compiler import rebuild_builtin_pack
 from name_transduction_engine.paths import DB_PATH, BUILTIN_PACKS_DIR
 
+__all__ = [
+    "ensure_builtin_pack_enrichment",
+]
+
 REQUIRED_MANIFEST_KEYS = {"id", "display_name", "version", "bcp47", "kind"}
 
 
