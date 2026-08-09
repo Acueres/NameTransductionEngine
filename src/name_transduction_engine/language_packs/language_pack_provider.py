@@ -5,16 +5,16 @@ import yaml
 from pathlib import Path
 from typing import Any
 
-from name_transduction_engine.enrichment.packs.resolver import (
+from name_transduction_engine.language_packs.packs.resolver import (
     BuiltinPackPaths,
     discover_builtin_packs,
 )
-from name_transduction_engine.enrichment.packs.schema import create_pack_schema
-from name_transduction_engine.enrichment.packs.compiler import rebuild_builtin_pack
+from name_transduction_engine.language_packs.packs.schema import create_pack_schema
+from name_transduction_engine.language_packs.packs.compiler import rebuild_builtin_pack
 from name_transduction_engine.paths import DB_PATH, BUILTIN_PACKS_DIR
 
 __all__ = [
-    "ensure_builtin_pack_enrichment",
+    "ensure_builtin_packs",
 ]
 
 REQUIRED_MANIFEST_KEYS = {"id", "display_name", "version", "bcp47", "kind"}
@@ -75,9 +75,9 @@ def _pack_is_current(
     return bool(row and row["content_hash"] == content_hash)
 
 
-def ensure_builtin_pack_enrichment() -> None:
+def ensure_builtin_packs() -> None:
     """
-    Ensure pack-scoped enrichment tables exist and are populated from all
+    Ensure pack-scoped tables exist and are populated from all
     built-in packs found under builtin_packs_dir.
 
     Safe to call repeatedly: packs whose content hash has not changed since
@@ -109,7 +109,7 @@ def ensure_builtin_pack_enrichment() -> None:
                 print(f"Pack {pack_id!r}: up to date, skipping.")
                 continue
 
-            print(f"Pack {pack_id!r}: building enrichment.")
+            print(f"Building pack {pack_id!r}.")
             rebuild_builtin_pack(
                 conn=conn,
                 paths=paths,

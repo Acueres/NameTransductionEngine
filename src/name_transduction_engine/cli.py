@@ -6,8 +6,8 @@ from name_transduction_engine.datasets.dataset_provider import (
     download_wikidata_raw,
     build_wikidata_compact_dataset,
 )
-from name_transduction_engine.enrichment.enrichment_provider import (
-    ensure_builtin_pack_enrichment,
+from name_transduction_engine.language_packs.language_pack_provider import (
+    ensure_builtin_packs,
 )
 from name_transduction_engine.datasets.maintenance import (
     collect_data_status,
@@ -28,7 +28,7 @@ from name_transduction_engine.datasets.maintenance import (
 
 def cmd_init(args: argparse.Namespace) -> int:
     ensure_datasets(args.force)
-    ensure_builtin_pack_enrichment()
+    ensure_builtin_packs()
     return 0
 
 
