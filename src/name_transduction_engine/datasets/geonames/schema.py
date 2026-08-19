@@ -13,7 +13,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             name            TEXT NOT NULL,
             asciiname       TEXT,
             latitude        REAL,
-            longitude      REAL,
+            longitude       REAL,
             country_code    TEXT,
             admin1_code     TEXT,
             admin2_code     TEXT,

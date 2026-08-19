@@ -15,6 +15,7 @@ from name_transduction_engine.datasets.maintenance import (
     clean_data,
     format_clean_report,
 )
+from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
 
 # --------------------------------------------------------------------------- #
 # Command handlers
@@ -62,12 +63,13 @@ def cmd_convert(args: argparse.Namespace) -> int:
 
     # TODO: result = transduce(args.name, to=args.to, source=args.source,
     #                          mode=args.mode, topk=args.topk)
-    print(
-        f"[transduce] name={args.name!r} from={args.source} to={args.to} "
-        f"mode={args.mode} topk={args.topk} json={args.json}"
-    )
-    # Example of the no-result-is-still-exit-0 contract:
-    #   if not result: return 0   # print nothing (or a marker to stderr)
+    candidates = lookup_name(args.name, args.to)[:args.topk]
+    print(f"[transduce] name={args.name!r} to={args.to} " f"topk={args.topk}")
+    for candidate in candidates:
+        print(
+            f"[result] name={candidate.candidate_name} lang={candidate.language_code} "
+            f"source={candidate.source} id={candidate.entity_id}"
+        )
     return 0
 
 
