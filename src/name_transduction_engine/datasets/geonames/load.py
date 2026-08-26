@@ -1,11 +1,11 @@
 import csv
 import sqlite3
-import unicodedata
 
 from io import TextIOWrapper
 from pathlib import Path
 from zipfile import ZipFile
 from name_transduction_engine.paths import RAW_DIR_GEONAMES
+from name_transduction_engine.normalization import normalize_name
 
 SPECIAL_ISOLANGUAGE = {
     "link",  # website link, mostly wikipedia
@@ -107,7 +107,12 @@ REQUIRED_TABLE_COLUMNS = {
     },
 }
 
-REQUIRED_POPULATED_TABLES = ("geoname", "alternate_name", "language_code", "build_metadata")
+REQUIRED_POPULATED_TABLES = (
+    "geoname",
+    "alternate_name",
+    "language_code",
+    "build_metadata",
+)
 
 
 def configure_connection(conn: sqlite3.Connection) -> None:
@@ -287,7 +292,7 @@ def _load_alternate_name_table(
                     _empty_to_none(padded_row[8].strip()),
                     _empty_to_none(padded_row[9].strip()),
                     _classify_row_kind(isolanguage),
-                    _normalize_name(alternate_name),
+                    normalize_name(alternate_name),
                 )
 
                 batch.append(record)
@@ -396,13 +401,6 @@ def _classify_row_kind(isolanguage: str) -> str:
     if isolanguage == "":
         return "name_untyped"
     return "name_lang"
-
-
-def _normalize_name(name: str) -> str | None:
-    stripped = name.strip()
-    if not stripped:
-        return None
-    return unicodedata.normalize("NFC", stripped).casefold()
 
 
 def _flag_to_int(value: str) -> int:

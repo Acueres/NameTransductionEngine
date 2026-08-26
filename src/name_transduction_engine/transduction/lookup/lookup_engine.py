@@ -1,3 +1,4 @@
+from name_transduction_engine.normalization import normalize_name
 from .db import run_query
 from .lookup_candidate import LookupCandidate
 
@@ -13,13 +14,13 @@ def lookup_name(name: str, target: str) -> list[LookupCandidate]:
 
     SELECT geonameid
     FROM alternate_name
-    WHERE alternate_name = :name
+    WHERE normalized_name = :name_norm
 ),
 
 resolved_wikidata AS (
     SELECT qid
     FROM wikidata_location_name
-    WHERE name = :name
+    WHERE name_norm = :name_norm
 )
 
 SELECT DISTINCT
@@ -47,16 +48,18 @@ WHERE wd_name.geo_lang = :target
 ORDER BY source, entity_id, candidate_name;
     """
 
-    df = run_query(QUERY, {"name": name, "target": target})
-    geonames_results = [
+    name_norm = normalize_name(name)
+
+    df = run_query(QUERY, {"name": name, "name_norm": name_norm, "target": target})
+    results = [
         LookupCandidate(
-            candidate_name=row.candidate_name,
+            candidate_name=str(row.candidate_name),
             candidate_name_transliterated=None,
-            source=row.source,
-            entity_id=row.entity_id,
-            language_code=row.language_code,
+            source=str(row.source),
+            entity_id=str(row.entity_id),
+            language_code=str(row.language_code),
         )
         for row in df.itertuples(index=False)
     ]
 
-    return geonames_results
+    return results

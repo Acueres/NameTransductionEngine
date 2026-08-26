@@ -1,6 +1,5 @@
 import bz2
 import gzip
-import unicodedata
 
 import langcodes
 import orjson
@@ -12,6 +11,7 @@ from name_transduction_engine.paths import (
     WIKIDATA_LOCATIONS_BUILD_PATH,
     WIKIDATA_RAW_DUMP_PATH,
 )
+from name_transduction_engine.normalization import normalize_name
 
 LOCATION_CLASS_QIDS = {
     "Q6256": "country",
@@ -244,7 +244,7 @@ def _extract_label_rows(entity: dict[str, Any]) -> list[dict[str, Any]]:
                 "wd_lang": wd_lang,
                 "geo_lang": lang_norm["geo_lang"],
                 "name": name,
-                "name_norm": _normalize_name(name),
+                "name_norm": normalize_name(name),
                 "term_type": "label",
             }
         )
@@ -388,10 +388,6 @@ def normalize_wd_lang(wd_code: str) -> dict[str, str | None]:
             "iso639_3": None,
             "iso639_1": None,
         }
-
-
-def _normalize_name(name: str) -> str:
-    return unicodedata.normalize("NFC", " ".join(name.strip().split())).casefold()
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
