@@ -61,15 +61,33 @@ def cmd_convert(args: argparse.Namespace) -> int:
         print("error: name is empty", file=sys.stderr)
         return 1
 
-    # TODO: result = transduce(args.name, to=args.to, source=args.source,
-    #                          mode=args.mode, topk=args.topk)
-    candidates = lookup_name(args.name, args.to)[:args.topk]
-    print(f"[transduce] name={args.name!r} to={args.to} " f"topk={args.topk}")
-    for candidate in candidates:
+    entities = lookup_name(args.name, args.to)
+
+    print(f"[lookup] name={args.name!r} " f"to={args.to} " f"entities={len(entities)}")
+
+    if not entities:
+        print("[result] no match")
+        return 0
+
+    for entity in entities[: args.topk]:
+        location = ""
+        if entity.latitude is not None and entity.longitude is not None:
+            location = f" coords=({entity.latitude:.5f}, {entity.longitude:.5f})"
+
         print(
-            f"[result] name={candidate.candidate_name} lang={candidate.language_code} "
-            f"source={candidate.source} id={candidate.entity_id}"
+            f"[entity] source={entity.source} "
+            f"id={entity.entity_id} "
+            f"type={entity.entity_type}"
+            f"{location}"
         )
+
+        if not entity.names:
+            print(f"  [name] no name for language={args.to}")
+            continue
+
+        for name in entity.names:
+            print(f"  [name] {name.name} " f"lang={name.language_code}")
+
     return 0
 
 

@@ -1,8 +1,9 @@
 from dataclasses import dataclass
+from .lookup_name import LookupName
 
 
 @dataclass(frozen=True)
-class LookupCandidate:
+class LookupEntity:
     source: str
     entity_id: str
 
@@ -11,5 +12,4 @@ class LookupCandidate:
     latitude: float | None
     longitude: float | None
 
-    language_code: str | None
-    candidate_name: str | None
+    names: tuple[LookupName, ...]
