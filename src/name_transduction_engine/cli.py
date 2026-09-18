@@ -56,7 +56,7 @@ def cmd_data_clean(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_convert(args: argparse.Namespace) -> int:
+def cmd_lookup(args: argparse.Namespace) -> int:
     if not args.name.strip():
         print("error: name is empty", file=sys.stderr)
         return 1
@@ -74,19 +74,20 @@ def cmd_convert(args: argparse.Namespace) -> int:
         if entity.latitude is not None and entity.longitude is not None:
             location = f" coords=({entity.latitude:.5f}, {entity.longitude:.5f})"
 
-        print(
-            f"[entity] source={entity.source} "
-            f"id={entity.entity_id} "
-            f"type={entity.entity_type}"
-            f"{location}"
-        )
+        if entity.names or args.all:
+            print(
+                f"[entity] source={entity.source} "
+                f"id={entity.entity_id} "
+                f"type={entity.entity_type}"
+                f"{location}"
+            )
 
-        if not entity.names:
-            print(f"  [name] no name for language={args.to}")
-            continue
+            if args.all and len(entity.names) == 0:
+                print(f"  [name] no name for language={args.to}")
+                continue
 
         for name in entity.names:
-            print(f"  [name] {name.name} " f"lang={name.language_code}")
+            print(f"  [name] {name.name} ({name.romanized_name}) " f"lang={name.language_code}")
 
     return 0
 
@@ -168,30 +169,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.set_defaults(func=cmd_data_clean)
 
     # Transduction
-    p_convert = sub.add_parser("convert", help="convert a name into a target form")
-    p_convert.add_argument(
+    # Lookup
+    p_lookup = sub.add_parser("lookup", help="look up a name from available sources")
+    p_lookup.add_argument(
         "name",
         help="the name to convert (use -- before " "names that start with a dash)",
     )
-    p_convert.add_argument(
+    p_lookup.add_argument(
         "--to", required=True, metavar="LANG", help="target language code, e.g. 'latin'"
     )
-    p_convert.add_argument(
-        "--from",
-        dest="source",
-        metavar="LANG",
-        help="source language/script code (optional)",
-    )
-    p_convert.add_argument(
-        "--mode", choices=["strict", "lookup", "adapt"], default="lookup"
-    )
-    p_convert.add_argument(
+    p_lookup.add_argument(
         "--topk", type=int, default=1, help="number of ranked candidates to return"
     )
-    p_convert.add_argument(
-        "--json", action="store_true", help="emit machine-readable JSON"
+    p_lookup.add_argument(
+        "--all", action="store_true", help="show all matched candidates"
     )
-    p_convert.set_defaults(func=cmd_convert)
+    p_lookup.set_defaults(func=cmd_lookup)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")

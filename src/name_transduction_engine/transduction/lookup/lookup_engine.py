@@ -8,6 +8,7 @@ from .db import run_query
 from .lookup_entity import LookupEntity
 from .lookup_name import LookupName
 from .lookup_candidate import LookupCandidate
+from ..transliteration.romanization import Romanizer
 
 
 def lookup_name(name: str, target: str) -> list[LookupEntity]:
@@ -80,7 +81,9 @@ ORDER BY source, entity_id, candidate_name;
         for row in df.itertuples(index=False)
     ]
 
-    return _group_lookup_candidates(candidates)
+    grouped_candidates = _group_lookup_candidates(candidates)
+    romanized_candidates = _romanize_lookup_names(grouped_candidates)
+    return romanized_candidates
 
 
 def _group_lookup_candidates(
@@ -98,6 +101,7 @@ def _group_lookup_candidates(
         names = tuple(
             LookupName(
                 name=row.candidate_name,
+                romanization=None,
                 language_code=row.language_code,
             )
             for row in rows
@@ -116,6 +120,34 @@ def _group_lookup_candidates(
         )
 
     return entities
+
+
+def _romanize_lookup_names(entities: list[LookupEntity]):
+    result: list[LookupEntity] = []
+    rm = Romanizer()
+
+    for entity in entities:
+        romanized_names = tuple(
+            LookupName(
+                name=n.name,
+                romanization=rm.romanize(n.name),
+                language_code=n.language_code,
+            )
+            for n in entity.names
+        )
+
+        new_entity = LookupEntity(
+                        source=entity.source,
+                        entity_id=entity.entity_id,
+                        entity_type=entity.entity_type,
+                        latitude=entity.latitude,
+                        longitude=entity.longitude,
+                        names=romanized_names,
+                    )
+
+        result.append(new_entity)
+
+    return result
 
 
 def _optional_float(value) -> float | None:

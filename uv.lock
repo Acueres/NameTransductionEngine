@@ -209,6 +209,22 @@ wheels = [
 ]
 
 [[package]]
+name = "icukit-pyicu"
+version = "78.3.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f1/19/aab7d0016e88b85d68a32cab45e248e18f1b123b65eaa4155bd20a9499d1/icukit_pyicu-78.3.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:737fd2aa1b828bff47af2304539931d1f940451dc0600f6d02ebe2460a5c0eaf", size = 62985028, upload-time = "2026-07-07T00:33:21.532Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/a6/c7724a1de0b0ada1cd37c0aed74c8ff771522c447e4ab56161b4d661d73f/icukit_pyicu-78.3.0-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:06bc512db79a2178a781422bbd3c80a4fca4d176eec90f7cd60822c65cbb201d", size = 64838036, upload-time = "2026-07-07T00:33:25.065Z" },
+    { url = "https://files.pythonhosted.org/packages/80/7f/07b7f423bab162c6aa21458d79f65e97193ac75913ab0e48d3370ee3d96b/icukit_pyicu-78.3.0-cp312-cp312-manylinux_2_38_aarch64.manylinux_2_39_aarch64.whl", hash = "sha256:4c5d19f9c348ce6c15f6009d2b754ae8433a1b83538bbe1f0f080996e87a0642", size = 64441433, upload-time = "2026-07-07T00:33:28.524Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/a1/89884cea5c68a5b5f6e7acbd03740216d5d4ff062350dfb9aeb55cb1f871/icukit_pyicu-78.3.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:070deb5d48843480e01aa4ddc8f27f8df5dac1c1925e9f606bc4e8fbdebee696", size = 62986789, upload-time = "2026-07-07T00:33:32.151Z" },
+    { url = "https://files.pythonhosted.org/packages/df/2a/d5fcc87a31466df13c414faffcf73d57fe9bbd62f6669c928ce073aaa48a/icukit_pyicu-78.3.0-cp313-cp313-manylinux_2_35_x86_64.whl", hash = "sha256:1240f2dd5544b5137af72313595c7740b5d73f80ee1f3293ed3526ff5b145a88", size = 64839782, upload-time = "2026-07-07T00:33:35.796Z" },
+    { url = "https://files.pythonhosted.org/packages/42/cc/04dbc146f3b6914eec3e694c00771b136dc62921340571a08711ce82c1a5/icukit_pyicu-78.3.0-cp313-cp313-manylinux_2_38_aarch64.manylinux_2_39_aarch64.whl", hash = "sha256:31a51b1090df7126e47b4a1f078bad01817a371ec1a5f8b335ca880f97f94e32", size = 64443586, upload-time = "2026-07-07T00:33:39.644Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/aa/39961f96bc751ea744c844fca0f791a100029d94111843fad68bbcea554b/icukit_pyicu-78.3.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:7f69f29d8a4740241d80c602eabf2ba14fb42e73933865659768756fa1ab43a4", size = 62985457, upload-time = "2026-07-07T00:33:43.797Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/7a/004a2d4baa71f36d6a117f4305eaac2c9b33b1a66867dcb1e48806cdf0ad/icukit_pyicu-78.3.0-cp314-cp314-manylinux_2_35_x86_64.whl", hash = "sha256:928399a5954f75fc99b2add7a94dae09ad95677a4a9f71e9cdccff3ac3bb5c46", size = 64838072, upload-time = "2026-07-07T00:33:47.331Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/0a/806b41bb35e52ff6bf3676cac5de64116e914d32c365274271d077f3bf4d/icukit_pyicu-78.3.0-cp314-cp314-manylinux_2_38_aarch64.manylinux_2_39_aarch64.whl", hash = "sha256:d3416b776b9f045687d47918a0a7d7305b0f1434d12bb94b98273e1823d31635", size = 64441694, upload-time = "2026-07-07T00:33:50.889Z" },
+]
+
+[[package]]
 name = "idna"
 version = "3.11"
 source = { registry = "https://pypi.org/simple" }
@@ -446,6 +462,7 @@ name = "name-transduction-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "icukit-pyicu" },
     { name = "jinja2" },
     { name = "langcodes" },
     { name = "matplotlib" },
@@ -463,6 +480,7 @@ analysis = [
 
 [package.metadata]
 requires-dist = [
+    { name = "icukit-pyicu", specifier = ">=78.3.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langcodes", specifier = ">=3.5.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
