@@ -69,7 +69,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
         print("[result] no match")
         return 0
 
-    for entity in entities[: args.topk]:
+    for entity in entities:
         location = ""
         if entity.latitude is not None and entity.longitude is not None:
             location = f" coords=({entity.latitude:.5f}, {entity.longitude:.5f})"
@@ -177,9 +177,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lookup.add_argument(
         "--to", required=True, metavar="LANG", help="target language code, e.g. 'latin'"
-    )
-    p_lookup.add_argument(
-        "--topk", type=int, default=1, help="number of ranked candidates to return"
     )
     p_lookup.add_argument(
         "--all", action="store_true", help="show all matched candidates"
