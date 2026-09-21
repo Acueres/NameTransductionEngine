@@ -16,7 +16,7 @@ def lookup_name(name: str, target: str) -> list[LookupEntity]:
     WITH resolved_geonames AS (
     SELECT geonameid
     FROM geoname
-    WHERE name = :name
+    WHERE normalized_name = :name_norm
 
     UNION
 
@@ -26,7 +26,7 @@ def lookup_name(name: str, target: str) -> list[LookupEntity]:
 ),
 
 resolved_wikidata AS (
-    SELECT qid
+    SELECT DISTINCT qid
     FROM wikidata_location_name
     WHERE name_norm = :name_norm
 )
@@ -67,7 +67,7 @@ ORDER BY source, entity_id, candidate_name;
 
     name_norm = normalize_name(name)
 
-    df = run_query(QUERY, {"name": name, "name_norm": name_norm, "target": target})
+    df = run_query(QUERY, {"name_norm": name_norm, "target": target})
     candidates = [
         LookupCandidate(
             source=str(row.source),

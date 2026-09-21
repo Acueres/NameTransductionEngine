@@ -51,7 +51,6 @@ ALT_COLUMNS = [
     "to_date",
 ]
 
-# Pruned geoname schema for the prototype.
 GEONAME_KEEP_COLUMNS = [
     "geonameid",
     "name",
@@ -191,9 +190,10 @@ def _load_geoname_table(
             admin2_code,
             feature_class,
             feature_code,
-            population
+            population,
+            normalized_name
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     batch: list[tuple] = []
@@ -213,9 +213,11 @@ def _load_geoname_table(
                     for index in GEONAME_KEEP_INDICES
                 ]
 
+                name = values[1].strip()
+
                 record = (
                     _to_int(values[0]),  # geonameid
-                    _empty_to_none(values[1]),
+                    name,
                     _empty_to_none(values[2]),
                     _to_float(values[3]),
                     _to_float(values[4]),
@@ -225,6 +227,7 @@ def _load_geoname_table(
                     _empty_to_none(values[8]),
                     _empty_to_none(values[9]),
                     _to_int(values[10]),  # population
+                    normalize_name(name)
                 )
 
                 batch.append(record)

@@ -1,7 +1,7 @@
 import sqlite3
 import pandas as pd
 
-from src.name_transduction_engine.paths import DB_PATH
+from name_transduction_engine.paths import DB_PATH
 
 
 def _get_conn() -> sqlite3.Connection:

@@ -19,7 +19,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             admin2_code     TEXT,
             feature_class   TEXT,
             feature_code    TEXT,
-            population      INTEGER
+            population      INTEGER,
+            normalized_name TEXT NOT NULL
         );
 
         CREATE TABLE alternate_name (
@@ -55,40 +56,12 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
 def build_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript("""
-        CREATE INDEX idx_geoname_country_code
-            ON geoname(country_code);
-
-        CREATE INDEX idx_geoname_feature
-            ON geoname(feature_class, feature_code);
-
-        CREATE INDEX idx_geoname_population
-            ON geoname(population);
-                       
-        CREATE INDEX idx_geoname_coordinates
-            ON geoname(latitude, longitude);
-                       
-        CREATE INDEX idx_geoname_country_feature_coordinates
-            ON geoname(country_code, feature_class, feature_code, latitude, longitude);
-
-        CREATE INDEX idx_alt_geonameid
-            ON alternate_name(geonameid);
-
-        CREATE INDEX idx_alt_isolanguage
-            ON alternate_name(isolanguage);
-
-        CREATE INDEX idx_alt_row_kind
-            ON alternate_name(row_kind);
+        CREATE INDEX idx_geoname_normalized_name
+        ON geoname(normalized_name);
 
         CREATE INDEX idx_alt_normalized_name
-            ON alternate_name(normalized_name);
-
-        CREATE INDEX idx_alt_lang_name
-            ON alternate_name(isolanguage, normalized_name);
+        ON alternate_name(normalized_name, geonameid);
 
         CREATE INDEX idx_alt_geoname_lang
-            ON alternate_name(geonameid, isolanguage);
-
-        CREATE INDEX idx_alt_lookup_candidates
-            ON alternate_name(isolanguage, normalized_name, geonameid)
-            WHERE row_kind IN ('name_lang', 'name_untyped');
+        ON alternate_name(geonameid, isolanguage);
         """)

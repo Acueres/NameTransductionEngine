@@ -101,12 +101,9 @@ def build_indexes(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_wd_lang_norm_geo_lang
         ON wikidata_lang_norm (geo_lang);
 
-        CREATE INDEX idx_wd_location_name_lookup
-        ON wikidata_location_name (geo_lang, name_norm);
+        CREATE INDEX idx_wd_name_resolve
+        ON wikidata_location_name (name_norm, qid);
 
-        CREATE INDEX idx_wd_location_name_qid
-        ON wikidata_location_name (qid);
-
-        CREATE INDEX idx_wd_location_name_name_norm
-        ON wikidata_location_name (name_norm);
+        CREATE INDEX idx_wd_name_hop
+        ON wikidata_location_name (qid, geo_lang);
         """)
