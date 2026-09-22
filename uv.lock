@@ -4,10 +4,14 @@ requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version >= '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "(python_full_version >= '3.14' and platform_machine != 'arm64' and sys_platform == 'darwin') or (python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
     "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.14' and sys_platform == 'linux'",
+    "python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "(python_full_version < '3.14' and platform_machine != 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')",
 ]
 
 [[package]]
@@ -462,12 +466,13 @@ name = "name-transduction-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "icukit-pyicu" },
+    { name = "icukit-pyicu", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or sys_platform == 'linux'" },
     { name = "jinja2" },
     { name = "langcodes" },
     { name = "matplotlib" },
     { name = "orjson" },
     { name = "pandas" },
+    { name = "pyicu-wheels", marker = "(platform_machine == 'x86_64' and sys_platform == 'darwin') or sys_platform == 'win32'" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -480,7 +485,8 @@ analysis = [
 
 [package.metadata]
 requires-dist = [
-    { name = "icukit-pyicu", specifier = ">=78.3.0" },
+    { name = "icukit-pyicu", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = "==78.3.0" },
+    { name = "icukit-pyicu", marker = "sys_platform == 'linux'", specifier = "==78.3.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langcodes", specifier = ">=3.5.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
@@ -488,6 +494,8 @@ requires-dist = [
     { name = "orjson", specifier = ">=3.11.8" },
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = ">=3.0.1" },
+    { name = "pyicu-wheels", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "==2.15.2" },
+    { name = "pyicu-wheels", marker = "sys_platform == 'win32'", specifier = "==2.15.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.33.0" },
 ]
@@ -735,6 +743,29 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/e4/4b64a97d71b2a83158134abbb2f5bd3f8a2ea691361282f010998f339ec7/pillow-12.2.0-cp314-cp314t-win32.whl", hash = "sha256:6bb77b2dcb06b20f9f4b4a8454caa581cd4dd0643a08bacf821216a16d9c8354", size = 6482084, upload-time = "2026-04-01T14:45:47.568Z" },
     { url = "https://files.pythonhosted.org/packages/ba/13/306d275efd3a3453f72114b7431c877d10b1154014c1ebbedd067770d629/pillow-12.2.0-cp314-cp314t-win_amd64.whl", hash = "sha256:6562ace0d3fb5f20ed7290f1f929cae41b25ae29528f2af1722966a0a02e2aa1", size = 7225152, upload-time = "2026-04-01T14:45:50.032Z" },
     { url = "https://files.pythonhosted.org/packages/ff/6e/cf826fae916b8658848d7b9f38d88da6396895c676e8086fc0988073aaf8/pillow-12.2.0-cp314-cp314t-win_arm64.whl", hash = "sha256:aa88ccfe4e32d362816319ed727a004423aab09c5cea43c01a4b435643fa34eb", size = 2556579, upload-time = "2026-04-01T14:45:52.529Z" },
+]
+
+[[package]]
+name = "pyicu-wheels"
+version = "2.15.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/92/4d645665b80585791d02b920e1098e8489989c9cacc4742428288d31b0d0/pyicu_wheels-2.15.2-cp312-cp312-macosx_15_0_x86_64.whl", hash = "sha256:179f3634a45c3a8bb50f0d5f1a068f30cc5d44948ddc58e816edf82c94c87651", size = 15070399, upload-time = "2026-03-11T09:11:20.968Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/ce/0ccfdc52eded2598f3e31b86f6a1b6e2f8db9e9da0937a12351e17775b0d/pyicu_wheels-2.15.2-cp312-cp312-win32.whl", hash = "sha256:5b447566bf2c2daf7dd26d72a88582c780262f78519d3036b279e63b383768b1", size = 14982152, upload-time = "2026-03-11T12:46:12.119Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/e1/d67ed936632f3e6eac66342cb068e1ebbf83f0d31b10d6e6dd4f22b1ba3b/pyicu_wheels-2.15.2-cp312-cp312-win_amd64.whl", hash = "sha256:4a4b881fd4c647a5871bc0277232a5ed93a0b278dba224a305f5ec2f040aa5c7", size = 15541240, upload-time = "2026-03-11T12:46:15.162Z" },
+    { url = "https://files.pythonhosted.org/packages/df/81/dde3d09258fd8d086b773c2e11213f64c3e34d786247bc95cbb409d7e0d0/pyicu_wheels-2.15.2-cp312-cp312-win_arm64.whl", hash = "sha256:6fbc3708822070c5f8605a7ecbaeaa4a0ab2f7bdf6997cb5d862e48e088ca56d", size = 15064758, upload-time = "2026-03-11T12:46:19Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/71/51d002090930d3c95213a2d3c274b9e94c0db4432d2215174cd6cc70e691/pyicu_wheels-2.15.2-cp313-cp313-macosx_15_0_x86_64.whl", hash = "sha256:f24511341c73dbfb6c730b1ccc72f278ee5db410dd3785d74b6a4b8e749c1877", size = 15070382, upload-time = "2026-03-11T12:46:25.706Z" },
+    { url = "https://files.pythonhosted.org/packages/29/c9/d8afdbb5d2880717ec3a922afdba8ea7a11ecbde3653bcc200795fd23ca2/pyicu_wheels-2.15.2-cp313-cp313-win32.whl", hash = "sha256:418775dbd1229f0ddf5cda4328600c15062edb59f379844bd92b86e832e19d4c", size = 14982192, upload-time = "2026-03-11T12:47:01.611Z" },
+    { url = "https://files.pythonhosted.org/packages/77/8a/37e915e991e8168109ea423610bafd6170fb416d908cf74b2b5ab1dc48de/pyicu_wheels-2.15.2-cp313-cp313-win_amd64.whl", hash = "sha256:e32d113c13a801173c1bfe5988db1699a3c3549b92aa8927b744cd64c47c5e28", size = 15541211, upload-time = "2026-03-11T12:47:05.946Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/12/9450b04bde703992a6553c9f71c8f338bcea6dbfc1d596154731aef77cbe/pyicu_wheels-2.15.2-cp313-cp313-win_arm64.whl", hash = "sha256:ea217a8a3dc0e06e37ac04b5fbd676e76cce9fedfd66a7cf324d78c8bd63df7b", size = 15064787, upload-time = "2026-03-11T12:47:09.133Z" },
+    { url = "https://files.pythonhosted.org/packages/42/b7/d6576cbf18e2f5ac7023a8197a33a31e092c27d632308c927ce3b0724b48/pyicu_wheels-2.15.2-cp314-cp314-macosx_15_0_x86_64.whl", hash = "sha256:4621467d6c1e0696e80d10452983968b44bac5d904fc652544d579fb73d20c3d", size = 15070444, upload-time = "2026-03-11T12:47:16.058Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/c3/93f62e3a59fc0205ef9016613070abb52e89d86af09895547e36a712c54d/pyicu_wheels-2.15.2-cp314-cp314-win32.whl", hash = "sha256:91b22f65ae53265d28fb53801dba4aee7e255ac741e843ad20cb8929ef80fb91", size = 15620445, upload-time = "2026-03-11T12:47:50.94Z" },
+    { url = "https://files.pythonhosted.org/packages/28/1e/6cf3ae30fd8a6eb954b6d777c340890f0039f285debd1d72859c826411dd/pyicu_wheels-2.15.2-cp314-cp314-win_amd64.whl", hash = "sha256:42a110ba8209e23302d0eef61c32c23713a99d6d1f49748f83f9e712e582f1e0", size = 16213547, upload-time = "2026-03-11T12:47:55.959Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/d9/da3dd2c1ffc82a561b015ff2c39abb43138397364fe138f0fa1f42d8d949/pyicu_wheels-2.15.2-cp314-cp314-win_arm64.whl", hash = "sha256:f142c9e6a84949b94601243bb3f3aaf15a099d96f3819a3c4ca3d02a8665c602", size = 15705143, upload-time = "2026-03-11T12:48:01.176Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/a7/06ab91f3aa956c895ae37814f092ee029164484558ebea4d827b33539bd0/pyicu_wheels-2.15.2-cp314-cp314t-macosx_15_0_x86_64.whl", hash = "sha256:3c0670c645129c29e0c87fcd03726dd0b0d856546ea9238cb23cbf8e7fac5f0f", size = 15075435, upload-time = "2026-03-11T12:48:08.181Z" },
+    { url = "https://files.pythonhosted.org/packages/51/2e/4691a0a5b8a2c3763a22c265b5a72b13d41084cb958d2b1ebc7fb164d90f/pyicu_wheels-2.15.2-cp314-cp314t-win32.whl", hash = "sha256:36cb5a705b7d198b413e243e48c11d02a7ebc33bda5958a0ec9c852f31478a5f", size = 15628512, upload-time = "2026-03-11T12:48:43.906Z" },
+    { url = "https://files.pythonhosted.org/packages/85/af/82ee132629fa9eb470c07ca77382358f773236ac3b882471b401d55f8ce8/pyicu_wheels-2.15.2-cp314-cp314t-win_amd64.whl", hash = "sha256:ce369461880be7db5eaf60d640f34ddee78b70c225bd03f9f7df2932ef5a09b9", size = 16204048, upload-time = "2026-03-11T12:48:47.209Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/b8/7f8dad7a93413ab9fd7fdcf0108bcc31f5e6d3b7d523b99a062e1da6c129/pyicu_wheels-2.15.2-cp314-cp314t-win_arm64.whl", hash = "sha256:2d193aab4f69df4da72dcc53dcbbefb2a31eca927589573766cc8beed82f9d58", size = 15718321, upload-time = "2026-03-11T12:48:50.725Z" },
 ]
 
 [[package]]

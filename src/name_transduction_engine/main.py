@@ -10,4 +10,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(["lookup", "Byzantine Empire", "--to", "fa"]))
+    sys.exit(main(["lookup", "Smyrna", "--to", "am"]))
