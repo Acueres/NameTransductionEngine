@@ -3,6 +3,7 @@ from pathlib import Path
 PROJECT_ROOT = Path.cwd()
 RAW_DIR_GEONAMES = PROJECT_ROOT / "data" / "raw" / "geonames"
 RAW_DIR_WIKIDATA = PROJECT_ROOT / "data" / "raw" / "wikidata"
+RAW_DIR_LANGUAGE_CODES = PROJECT_ROOT / "data" / "raw" / "language_codes"
 BUILD_DIR = PROJECT_ROOT / "data" / "build"
 
 DB_PATH = PROJECT_ROOT / "data" / "names.sqlite"

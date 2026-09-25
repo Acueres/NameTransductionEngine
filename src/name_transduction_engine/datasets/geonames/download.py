@@ -6,7 +6,6 @@ from name_transduction_engine.paths import RAW_DIR_GEONAMES
 GEONAMES_URLS: Final[dict[str, str]] = {
     "allCountries.zip": "http://download.geonames.org/export/dump/allCountries.zip",
     "alternateNamesV2.zip": "http://download.geonames.org/export/dump/alternateNamesV2.zip",
-    "iso-languagecodes.txt": "http://download.geonames.org/export/dump/iso-languagecodes.txt",
     "admin1CodesASCII.txt": "http://download.geonames.org/export/dump/admin1CodesASCII.txt",
     "admin2Codes.txt": "http://download.geonames.org/export/dump/admin2Codes.txt",
 }

@@ -11,9 +11,7 @@ def build_session(*, use_env_proxy: bool = False) -> requests.Session:
     session.trust_env = use_env_proxy
     session.headers.update(
         {
-            "User-Agent": (
-                "NameTransductionEngine/0.1 " "(dataset bootstrap)"
-            ),
+            "User-Agent": ("NameTransductionEngine/0.1 " "(dataset bootstrap)"),
             "Accept": "*/*",
             "Accept-Encoding": "identity",
             "Connection": "close",
@@ -105,3 +103,24 @@ def get_and_save_file(
         if temp_path.exists():
             temp_path.unlink()
         raise
+
+
+import sqlite3
+
+
+def configure_connection(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA temp_store = MEMORY;")
+
+
+def ensure_build_metadata_table(conn: sqlite3.Connection) -> None:
+    """Shared by every dataset in the database file, so no dataset schema may
+    drop it. Each dataset writes its own keys and overwrites only those"""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS build_metadata (
+            key    TEXT PRIMARY KEY,
+            value  TEXT NOT NULL
+        )
+        """)

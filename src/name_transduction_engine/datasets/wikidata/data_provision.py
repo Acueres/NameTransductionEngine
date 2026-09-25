@@ -1,10 +1,22 @@
 import sqlite3
 
 from name_transduction_engine.paths import DB_PATH, WIKIDATA_LOCATIONS_PATH
+from name_transduction_engine.datasets.shared import (
+    configure_connection,
+    ensure_build_metadata_table,
+)
+from name_transduction_engine.datasets.language_codes.data_provision import (
+    read_registry,
+)
+from name_transduction_engine.normalization.language_code_normalization import (
+    LanguageRegistry,
+    RegistryError,
+)
 from .build import build_wikidata_compact_dataset
 from .load import (
     is_wikidata_ready,
-    load_locations_dataset
+    load_locations_dataset,
+    write_build_metadata,
 )
 from .schema import create_schema, build_indexes
 from .download import download_wikidata_locations_data
@@ -31,11 +43,16 @@ def ensure_wikidata_sqlite(force: bool = False) -> None:
 
     conn = sqlite3.connect(DB_PATH)
     try:
-        _configure_connection(conn)
+        configure_connection(conn)
+        ensure_build_metadata_table(conn)
+        # Read before create_schema: if the registry is missing, fail without
+        # having dropped the existing Wikidata tables
+        registry = _read_registry_or_explain(conn)
         create_schema(conn)
-        load_locations_dataset(conn, WIKIDATA_LOCATIONS_PATH)
+        load_locations_dataset(conn, WIKIDATA_LOCATIONS_PATH, registry)
         build_indexes(conn)
-        conn.execute("ANALYZE;")
+        write_build_metadata(conn, registry)
+
         conn.commit()
     except Exception:
         conn.rollback()
@@ -53,8 +70,11 @@ def ensure_wikidata_sqlite(force: bool = False) -> None:
     print(f"Wikidata built successfully: {DB_PATH}")
 
 
-def _configure_connection(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    conn.execute("PRAGMA temp_store = MEMORY;")
+def _read_registry_or_explain(conn: sqlite3.Connection) -> LanguageRegistry:
+    try:
+        return read_registry(conn)
+    except (sqlite3.DatabaseError, RegistryError) as exc:
+        raise RuntimeError(
+            "Wikidata needs the language registry, which is missing or out of "
+            "date. Build language codes first (`nte init` does this in order)."
+        ) from exc

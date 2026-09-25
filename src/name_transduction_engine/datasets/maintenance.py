@@ -6,22 +6,51 @@ from pathlib import Path
 from name_transduction_engine.paths import (
     DB_PATH,
     RAW_DIR_GEONAMES,
+    RAW_DIR_LANGUAGE_CODES,
     RAW_DIR_WIKIDATA,
     BUILD_DIR,
     WIKIDATA_LOCATIONS_PATH,
     WIKIDATA_RAW_DUMP_PATH,
 )
-from .geonames.load import is_geonames_ready
-from .wikidata.load import is_wikidata_ready
+from .language_codes.download import (
+    IANA_REGISTRY_FILENAME,
+    ISO_LANGUAGECODES_FILENAME,
+)
+from .language_codes.load import (
+    REGISTRY_FINGERPRINT_KEY as LANGUAGE_REGISTRY_FINGERPRINT_KEY,
+    is_language_codes_ready,
+)
+from .geonames.load import (
+    REGISTRY_FINGERPRINT_KEY as GEONAMES_REGISTRY_FINGERPRINT_KEY,
+    is_geonames_ready,
+)
+from .geonames.schema import LANGUAGE_TAG_TABLE as GEONAMES_LANGUAGE_TAG_TABLE
+from .wikidata.load import (
+    REGISTRY_FINGERPRINT_KEY as WIKIDATA_REGISTRY_FINGERPRINT_KEY,
+    is_wikidata_ready,
+)
+from .wikidata.schema import LANGUAGE_TAG_TABLE as WIKIDATA_LANGUAGE_TAG_TABLE
 
 # Tables whose row counts are worth reporting, per source
-_GEONAMES_TABLES = ("geoname", "alternate_name", "language_code")
+_LANGUAGE_CODES_TABLES = (
+    "language",
+    "language_alias",
+    "language_retirement",
+    "language_subtag",
+)
+_GEONAMES_TABLES = ("geoname", "alternate_name", GEONAMES_LANGUAGE_TAG_TABLE)
 _WIKIDATA_TABLES = (
     "wikidata_location",
     "wikidata_location_name",
     "wikidata_location_geonames",
-    "wikidata_lang_norm",
+    "wikidata_location_p31",
+    WIKIDATA_LANGUAGE_TAG_TABLE,
 )
+
+_RAW_DIRS = (RAW_DIR_LANGUAGE_CODES, RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA)
+
+# How many unmapped tags to list per source in `nte data status`
+_UNMAPPED_TAGS_SHOWN = 10
 
 
 # Status
@@ -36,12 +65,28 @@ class ArtifactStatus:
 
 
 @dataclass(frozen=True)
+class LanguageTagSummary:
+    """How a source's raw language tags mapped to the registry, from its
+    language tag report table"""
+
+    rows_by_status: dict[str, int]  # tag_status -> number of name rows
+    distinct_tags: int
+    unmapped: list[
+        tuple[str, int, str | None]
+    ]  # (raw tag, rows, reason), most rows first
+    unmapped_total: int  # distinct unmapped tags, including those not listed
+
+
+@dataclass(frozen=True)
 class SourceStatus:
     """Readiness of one data source inside names.sqlite"""
 
     source: str
     ready: bool
     table_counts: dict[str, int]  # only tables that exist
+    # Why the source is not ready, when that can be told from the outside
+    reason: str | None = None
+    language_tags: LanguageTagSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +127,43 @@ def _read_build_metadata(conn: sqlite3.Connection) -> dict[str, str]:
         return {}
 
 
+def _language_tag_summary(
+    conn: sqlite3.Connection, table: str
+) -> LanguageTagSummary | None:
+    try:
+        rows = conn.execute(
+            f"SELECT raw_tag, tag_status, row_count, note FROM {table} "
+            "ORDER BY row_count DESC, raw_tag"
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return None
+    if not rows:
+        return None
+
+    rows_by_status: dict[str, int] = {}
+    for _, status, count, _ in rows:
+        rows_by_status[status] = rows_by_status.get(status, 0) + count
+    unmapped = [
+        (raw, count, note) for raw, status, count, note in rows if status == "unmapped"
+    ]
+
+    return LanguageTagSummary(
+        rows_by_status=dict(sorted(rows_by_status.items())),
+        distinct_tags=len(rows),
+        unmapped=unmapped[:_UNMAPPED_TAGS_SHOWN],
+        unmapped_total=len(unmapped),
+    )
+
+
+def _registry_mismatch(metadata: dict[str, str], built_with_key: str) -> str | None:
+    """Explain a dataset built against a different language registry"""
+    current = metadata.get(LANGUAGE_REGISTRY_FINGERPRINT_KEY)
+    built_with = metadata.get(built_with_key)
+    if current is None or built_with is None or built_with == current:
+        return None
+    return "built with a different language registry; run `nte init` to rebuild"
+
+
 def collect_data_status() -> DataStatus:
     """Gather a read-only snapshot of everything the data layer owns"""
     db = _artifact("names.sqlite", DB_PATH)
@@ -93,36 +175,66 @@ def collect_data_status() -> DataStatus:
         try:
             conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
             try:
-                sources.append(
-                    SourceStatus(
-                        source="geonames",
-                        ready=is_geonames_ready(DB_PATH),
-                        table_counts=_table_counts(conn, _GEONAMES_TABLES),
-                    )
-                )
-                sources.append(
-                    SourceStatus(
-                        source="wikidata",
-                        ready=is_wikidata_ready(DB_PATH),
-                        table_counts=_table_counts(conn, _WIKIDATA_TABLES),
-                    )
-                )
                 build_metadata = _read_build_metadata(conn)
+
+                language_codes_ready = is_language_codes_ready(DB_PATH)
+                sources.append(
+                    SourceStatus(
+                        source="language_codes",
+                        ready=language_codes_ready,
+                        table_counts=_table_counts(conn, _LANGUAGE_CODES_TABLES),
+                    )
+                )
+                for source, ready, tables, tag_table, fingerprint_key in (
+                    (
+                        "geonames",
+                        is_geonames_ready(DB_PATH),
+                        _GEONAMES_TABLES,
+                        GEONAMES_LANGUAGE_TAG_TABLE,
+                        GEONAMES_REGISTRY_FINGERPRINT_KEY,
+                    ),
+                    (
+                        "wikidata",
+                        is_wikidata_ready(DB_PATH),
+                        _WIKIDATA_TABLES,
+                        WIKIDATA_LANGUAGE_TAG_TABLE,
+                        WIKIDATA_REGISTRY_FINGERPRINT_KEY,
+                    ),
+                ):
+                    reason = None
+                    if not ready:
+                        reason = (
+                            "language registry not ready"
+                            if not language_codes_ready
+                            else _registry_mismatch(build_metadata, fingerprint_key)
+                        )
+                    sources.append(
+                        SourceStatus(
+                            source=source,
+                            ready=ready,
+                            table_counts=_table_counts(conn, tables),
+                            reason=reason,
+                            language_tags=_language_tag_summary(conn, tag_table),
+                        )
+                    )
             finally:
                 conn.close()
         except sqlite3.DatabaseError:
             # Corrupt or locked DB
             sources = [
-                SourceStatus(source="geonames", ready=False, table_counts={}),
-                SourceStatus(source="wikidata", ready=False, table_counts={}),
+                SourceStatus(source=name, ready=False, table_counts={})
+                for name in ("language_codes", "geonames", "wikidata")
             ]
 
     raw_artifacts = [
+        _artifact(name, RAW_DIR_LANGUAGE_CODES / name)
+        for name in (IANA_REGISTRY_FILENAME, ISO_LANGUAGECODES_FILENAME)
+    ]
+    raw_artifacts += [
         _artifact(name, RAW_DIR_GEONAMES / name)
         for name in (
             "allCountries.zip",
             "alternateNamesV2.zip",
-            "iso-languagecodes.txt",
             "admin1CodesASCII.txt",
             "admin2Codes.txt",
         )
@@ -134,7 +246,7 @@ def collect_data_status() -> DataStatus:
 
     partial_files = [
         _artifact(path.name, path)
-        for raw_dir in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA)
+        for raw_dir in _RAW_DIRS
         if raw_dir.is_dir()
         for path in sorted(raw_dir.glob("*.part"))
     ]
@@ -161,9 +273,13 @@ def format_data_status(status: DataStatus) -> str:
 
     for source in status.sources:
         marker = "ready" if source.ready else "NOT READY"
+        if source.reason:
+            marker += f" ({source.reason})"
         lines.append(f"  {source.source}: {marker}")
         for table, count in source.table_counts.items():
             lines.append(f"    {table}: {count:,} rows")
+        if source.language_tags is not None:
+            lines.extend(_format_language_tags(source.language_tags))
 
     if status.build_metadata:
         lines.append("  build metadata:")
@@ -185,6 +301,26 @@ def format_data_status(status: DataStatus) -> str:
     return "\n".join(lines)
 
 
+def _format_language_tags(summary: LanguageTagSummary) -> list[str]:
+    by_status = ", ".join(
+        f"{status} {count:,}" for status, count in summary.rows_by_status.items()
+    )
+    lines = [f"    language tags: {summary.distinct_tags} distinct; rows: {by_status}"]
+    if summary.unmapped_total:
+        shown = len(summary.unmapped)
+        more = summary.unmapped_total - shown
+        lines.append(
+            f"    unmapped tags ({summary.unmapped_total}"
+            + (f", top {shown} shown" if more else "")
+            + "):"
+        )
+        for raw, count, note in summary.unmapped:
+            lines.append(
+                f"      {raw!r}: {count:,} rows" + (f" ({note})" if note else "")
+            )
+    return lines
+
+
 # Clean
 @dataclass(frozen=True)
 class CleanReport:
@@ -196,7 +332,7 @@ class CleanReport:
 def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
     """Remove temporary and (optionally) raw downloaded files.
 
-    Always targeted: *.part files in both raw directories, plus orphaned
+    Always targeted: *.part files in every raw directory, plus orphaned
     *.meta.json resume-metadata files whose final artifact no longer exists.
 
     With include_raw=True, also removes the raw source files themselves.
@@ -206,7 +342,7 @@ def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
     targets: list[Path] = []
 
     # .part cleanup
-    for d in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA, BUILD_DIR):
+    for d in (*_RAW_DIRS, BUILD_DIR):
         if not d.is_dir():
             continue
 
@@ -221,7 +357,7 @@ def clean_data(include_raw: bool = False, preview: bool = False) -> CleanReport:
                 targets.append(meta_path)
 
     # raw cleanup
-    for d in (RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA):
+    for d in _RAW_DIRS:
         if not d.is_dir():
             continue
 

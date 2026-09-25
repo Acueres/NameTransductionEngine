@@ -5,16 +5,20 @@ from io import TextIOWrapper
 from pathlib import Path
 from zipfile import ZipFile
 from name_transduction_engine.paths import RAW_DIR_GEONAMES
-from name_transduction_engine.normalization import normalize_name
+from name_transduction_engine.normalization.name_normalization import normalize_name
+from name_transduction_engine.normalization.language_code_normalization import (
+    LanguageRegistry,
+    SourceTagCanonicalizer,
+)
+from name_transduction_engine.datasets.language_codes.data_provision import (
+    print_language_tag_summary,
+    stored_registry_fingerprint,
+    write_language_tag_report,
+)
+from .schema import LANGUAGE_TAG_TABLE
 
-SPECIAL_ISOLANGUAGE = {
-    "link",  # website link, mostly wikipedia
-    "wkdt",  # wikidata id
-    "post",  # postal code
-    "iata",  # airport code
-    "icao",  # airport code
-    "faac",  # airport code
-}
+# build_metadata key: the registry fingerprint the `lang` columns were built with
+REGISTRY_FINGERPRINT_KEY = "geonames_language_registry_fingerprint"
 
 GEONAME_COLUMNS = [
     "geonameid",
@@ -91,34 +95,22 @@ REQUIRED_TABLE_COLUMNS = {
         "is_historic",
         "from_date",
         "to_date",
-        "row_kind",
+        "lang",
+        "lang_script",
+        "lang_region",
+        "lang_variant",
+        "tag_status",
         "normalized_name",
     },
-    "language_code": {
-        "iso_639_3",
-        "iso_639_2",
-        "iso_639_1",
-        "language_name",
-    },
-    "build_metadata": {
-        "key",
-        "value",
+    LANGUAGE_TAG_TABLE: {
+        "raw_tag",
+        "tag_status",
+        "lang",
+        "row_count",
     },
 }
 
-REQUIRED_POPULATED_TABLES = (
-    "geoname",
-    "alternate_name",
-    "language_code",
-    "build_metadata",
-)
-
-
-def configure_connection(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    conn.execute("PRAGMA temp_store = MEMORY;")
+REQUIRED_POPULATED_TABLES = ("geoname", "alternate_name", LANGUAGE_TAG_TABLE)
 
 
 def is_geonames_ready(db_path: Path) -> bool:
@@ -155,6 +147,17 @@ def is_geonames_ready(db_path: Path) -> bool:
                 if row_count == 0:
                     return False
 
+            # The `lang` columns were built with the current language registry.
+            # A rebuilt registry with different contents makes this false, so
+            # GeoNames is rebuilt against it
+            built_with = conn.execute(
+                "SELECT value FROM build_metadata WHERE key = ?",
+                (REGISTRY_FINGERPRINT_KEY,),
+            ).fetchone()
+            current = stored_registry_fingerprint(conn)
+            if built_with is None or current is None or built_with[0] != current:
+                return False
+
             return True
         finally:
             conn.close()
@@ -162,15 +165,18 @@ def is_geonames_ready(db_path: Path) -> bool:
         return False
 
 
-def load_all_data(conn: sqlite3.Connection) -> None:
+def load_all_data(conn: sqlite3.Connection, registry: LanguageRegistry) -> None:
     print("Loading geoname table...")
     _load_geoname_table(conn, RAW_DIR_GEONAMES / "allCountries.zip")
 
     print("Loading alternate_name table...")
-    _load_alternate_name_table(conn, RAW_DIR_GEONAMES / "alternateNamesV2.zip")
+    canon = SourceTagCanonicalizer(registry, "geonames")
+    _load_alternate_name_table(conn, RAW_DIR_GEONAMES / "alternateNamesV2.zip", canon)
 
-    print("Loading language_code table...")
-    _load_language_code_table(conn, RAW_DIR_GEONAMES / "iso-languagecodes.txt")
+    report = canon.report()
+    write_language_tag_report(conn, LANGUAGE_TAG_TABLE, report)
+    conn.commit()
+    print_language_tag_summary(report)
 
 
 def _load_geoname_table(
@@ -227,7 +233,7 @@ def _load_geoname_table(
                     _empty_to_none(values[8]),
                     _empty_to_none(values[9]),
                     _to_int(values[10]),  # population
-                    normalize_name(name)
+                    normalize_name(name),
                 )
 
                 batch.append(record)
@@ -245,6 +251,7 @@ def _load_geoname_table(
 def _load_alternate_name_table(
     conn: sqlite3.Connection,
     zip_path: Path,
+    canon: SourceTagCanonicalizer,
     batch_size: int = 50_000,
 ) -> None:
     insert_sql = """
@@ -259,10 +266,14 @@ def _load_alternate_name_table(
             is_historic,
             from_date,
             to_date,
-            row_kind,
+            lang,
+            lang_script,
+            lang_region,
+            lang_variant,
+            tag_status,
             normalized_name
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     batch: list[tuple] = []
@@ -283,6 +294,13 @@ def _load_alternate_name_table(
                 isolanguage = padded_row[2].strip()
                 alternate_name = padded_row[3].strip()
 
+                # Every row goes through the canonicalizer, including the ones
+                # skipped next, so the tag report counts them too
+                source_tag = canon(isolanguage)
+                if source_tag.status == "non_name":
+                    continue
+                tag = source_tag.tag
+
                 record = (
                     alternate_name_id,
                     geonameid,
@@ -294,7 +312,11 @@ def _load_alternate_name_table(
                     _flag_to_int(padded_row[7]),
                     _empty_to_none(padded_row[8].strip()),
                     _empty_to_none(padded_row[9].strip()),
-                    _classify_row_kind(isolanguage),
+                    tag.lang if tag else None,
+                    tag.script if tag else None,
+                    tag.region if tag else None,
+                    tag.variant if tag else None,
+                    source_tag.status,
                     normalize_name(alternate_name),
                 )
 
@@ -310,71 +332,15 @@ def _load_alternate_name_table(
         conn.commit()
 
 
-def _load_language_code_table(
-    conn: sqlite3.Connection,
-    file_path: Path,
-    batch_size: int = 5_000,
-) -> None:
-    insert_sql = """
-        INSERT INTO language_code (
-            iso_639_3,
-            iso_639_2,
-            iso_639_1,
-            language_name
-        )
-        VALUES (?, ?, ?, ?)
-    """
-
-    batch: list[tuple] = []
-
-    with file_path.open("r", encoding="utf-8-sig", newline="") as text_file:
-        reader = csv.reader(text_file, delimiter="\t")
-
-        for row in reader:
-            if not row:
-                continue
-
-            if "Language Name" in row:
-                continue
-
-            padded_row = row + [""] * (4 - len(row))
-            iso_639_3, iso_639_2, iso_639_1, language_name = [
-                cell.strip() for cell in padded_row[:4]
-            ]
-
-            if not language_name:
-                continue
-
-            batch.append(
-                (
-                    _empty_to_none(iso_639_3),
-                    _empty_to_none(iso_639_2),
-                    _empty_to_none(iso_639_1),
-                    language_name,
-                )
-            )
-
-            if len(batch) >= batch_size:
-                conn.executemany(insert_sql, batch)
-                conn.commit()
-                batch.clear()
-
-    if batch:
-        conn.executemany(insert_sql, batch)
-        conn.commit()
-
-
-def write_build_metadata(conn: sqlite3.Connection) -> None:
+def write_build_metadata(conn: sqlite3.Connection, registry: LanguageRegistry) -> None:
     metadata = {
+        REGISTRY_FINGERPRINT_KEY: registry.fingerprint,
         "source": "GeoNames",
         "geoname_count": str(
             conn.execute("SELECT COUNT(*) FROM geoname").fetchone()[0]
         ),
         "alternate_name_count": str(
             conn.execute("SELECT COUNT(*) FROM alternate_name").fetchone()[0]
-        ),
-        "language_code_count": str(
-            conn.execute("SELECT COUNT(*) FROM language_code").fetchone()[0]
         ),
     }
 
@@ -396,14 +362,6 @@ def _find_zip_member(zf: ZipFile, preferred_name: str | None = None) -> str:
         return txt_names[0]
 
     raise ValueError(f"Could not determine text member in archive: {names}")
-
-
-def _classify_row_kind(isolanguage: str) -> str:
-    if isolanguage in SPECIAL_ISOLANGUAGE:
-        return "meta"
-    if isolanguage == "":
-        return "name_untyped"
-    return "name_lang"
 
 
 def _flag_to_int(value: str) -> int:

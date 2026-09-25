@@ -1,4 +1,5 @@
 import argparse
+import sqlite3
 import sys
 
 from name_transduction_engine.datasets.dataset_provider import (
@@ -15,7 +16,24 @@ from name_transduction_engine.datasets.maintenance import (
     clean_data,
     format_clean_report,
 )
+from name_transduction_engine import paths
 from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
+from name_transduction_engine.normalization.language_code_normalization import (
+    LanguageRegistry,
+    RegistryError,
+    UnknownLanguageError,
+    resolve_user_language,
+)
+from name_transduction_engine.datasets.language_codes.data_provision import (
+    read_registry,
+)
+from name_transduction_engine.datasets.language_codes.info import (
+    Coverage,
+    raw_tags_for,
+    read_coverage,
+    rows_for_tag,
+    search_languages,
+)
 
 # --------------------------------------------------------------------------- #
 # Command handlers
@@ -61,35 +79,254 @@ def cmd_lookup(args: argparse.Namespace) -> int:
         print("error: name is empty", file=sys.stderr)
         return 1
 
-    entities = lookup_name(args.name, args.to)
+    try:
+        result = lookup_name(args.name, args.to)
+    except UnknownLanguageError as exc:
+        # The message already carries did-you-mean suggestions
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (RegistryError, sqlite3.DatabaseError) as exc:
+        print(
+            f"error: lookup data unavailable ({exc}); run `nte init`", file=sys.stderr
+        )
+        return 1
 
-    print(f"[lookup] name={args.name!r} " f"to={args.to} " f"entities={len(entities)}")
+    entities = result.entities
+    print(
+        f"[lookup] name={args.name!r} "
+        f"to={result.language.tag} "
+        f"entities={len(entities)}"
+    )
+
+    for note in result.language.notes:
+        print(f"[note] {note}")
 
     if not entities:
         print("[result] no match")
         return 0
 
     for entity in entities:
+        if not entity.names and not args.all:
+            continue
+
         location = ""
         if entity.latitude is not None and entity.longitude is not None:
             location = f" coords=({entity.latitude:.5f}, {entity.longitude:.5f})"
 
-        if entity.names or args.all:
-            print(
-                f"[entity] source={entity.source} "
-                f"id={entity.entity_id} "
-                f"type={entity.entity_type}"
-                f"{location}"
-            )
+        print(
+            f"[entity] source={entity.source} "
+            f"id={entity.entity_id} "
+            f"type={entity.entity_type}"
+            f"{location}"
+        )
 
-            if args.all and len(entity.names) == 0:
-                print(f"  [name] no name for language={args.to}")
-                continue
+        if not entity.names:
+            print(f"  [name] no name for language={result.language.tag}")
+            continue
 
         for name in entity.names:
-            print(f"  [name] {name.name} ({name.romanized_name}) " f"lang={name.language_code}")
+            print(f"  [name] {_format_name(name)} lang={name.language_code}")
 
     return 0
+
+
+def _format_name(name) -> str:
+    """Native form first; the romanization only when it adds something (not for
+    names already in Latin), flagged when its confidence is low"""
+    romanization = name.romanization
+    if romanization is None or romanization.transform == "identity":
+        return name.name
+
+    text = f"{name.name} ({romanization.text})"
+    if romanization.confidence == "low":
+        text += " [low-confidence romanization]"
+    return text
+
+
+# Language information
+
+
+_MATCHED_VIA = {
+    "iso639_1": "ISO 639-1 code",
+    "iso639_2": "ISO 639-2 code",
+    "iso639_3": "ISO 639-3 code",
+    "retired": "retired code",
+    "name": "language name",
+}
+
+
+def cmd_lang(args: argparse.Namespace) -> int:
+    try:
+        conn = sqlite3.connect(f"file:{paths.DB_PATH}?mode=ro", uri=True)
+    except sqlite3.DatabaseError as exc:
+        print(
+            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
+        )
+        return 1
+    try:
+        registry = read_registry(conn)
+        coverage = read_coverage(conn)
+        if args.list:
+            return _lang_list(registry, coverage, args.limit)
+        if args.search is not None:
+            return _lang_search(registry, coverage, args.search, args.limit)
+        if args.query is None:
+            print(
+                "error: give a language to resolve, or use --search / --list",
+                file=sys.stderr,
+            )
+            return 2
+        return _lang_show(conn, registry, coverage, args.query)
+    except (RegistryError, sqlite3.DatabaseError) as exc:
+        print(
+            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
+        )
+        return 1
+    finally:
+        conn.close()
+
+
+def _lang_show(
+    conn: sqlite3.Connection,
+    registry: LanguageRegistry,
+    coverage: Coverage,
+    query: str,
+) -> int:
+    try:
+        resolved = resolve_user_language(query, registry)
+    except UnknownLanguageError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    tag = resolved.tag
+    rec = registry.record(tag.lang)
+    print(f"[language] {query!r} -> {tag}  {rec.name}")
+    print(
+        f"  matched   : {_MATCHED_VIA.get(resolved.matched_via, resolved.matched_via)}"
+    )
+    for note in resolved.notes:
+        print(f"  note      : {note}")
+
+    codes = [
+        f"639-1 {rec.iso639_1}" if rec.iso639_1 else None,
+        f"639-2/B {rec.iso639_2b}" if rec.iso639_2b else None,
+        f"639-2/T {rec.iso639_2t}" if rec.iso639_2t else None,
+        f"639-3 {rec.iso639_3}",
+    ]
+    print(f"  codes     : {' · '.join(c for c in codes if c)}")
+    if rec.aliases:
+        # "; " because a single alias can contain commas ("Greek, Modern (1453-)")
+        print(f"  also named: {'; '.join(rec.aliases)}")
+    print(f"  scope     : {rec.scope}")
+    if tag.script or tag.region or tag.variant:
+        parts = [
+            f"script {tag.script}" if tag.script else None,
+            f"region {tag.region}" if tag.region else None,
+            f"variant {tag.variant}" if tag.variant else None,
+        ]
+        print(
+            f"  narrowed  : {', '.join(p for p in parts if p)} "
+            "(only names carrying these subtags are returned)"
+        )
+
+    # Coverage: what `nte lookup --to <query>` can actually return
+    raw_tags = raw_tags_for(conn, tag.lang)
+    if not coverage.sources:
+        print("  names     : unknown (no dataset built; run `nte init`)")
+    else:
+        counts = rows_for_tag(raw_tags, tag)
+        print(f"  names     : {_format_counts(counts, coverage.sources)}")
+        if raw_tags:
+            counted = {id(r) for r in raw_tags if rows_for_tag([r], tag)}
+            shown = ", ".join(
+                f"{r.source}:{r.raw_tag!r} ({r.rows:,})"
+                + (f" = {r.tag}" if str(r.tag) != tag.lang else "")
+                + ("" if id(r) in counted else " [excluded]")
+                for r in raw_tags[:8]
+            )
+            more = f" … +{len(raw_tags) - 8} more" if len(raw_tags) > 8 else ""
+            print(f"  from tags : {shown}{more}")
+
+    # Macrolanguage relations, with coverage so the user can see where names are
+    if rec.macrolanguage:
+        macro = rec.macrolanguage
+        print(
+            f"  part of   : {registry.describe(macro)} [{coverage.total(macro):,} names]"
+        )
+    members = registry.members_of(tag.lang)
+    if members:
+        ranked = sorted(members, key=lambda m: (-coverage.total(m), m))
+        with_data = [m for m in ranked if coverage.total(m)]
+        listed = ", ".join(f"{m} [{coverage.total(m):,}]" for m in with_data[:10])
+        print(
+            f"  members   : {len(members)} languages, {len(with_data)} with names"
+            + (f": {listed}" if listed else "")
+            + (" …" if len(with_data) > 10 else "")
+        )
+
+    # The hint: nothing here, but a related language has names
+    if coverage.sources and not sum(rows_for_tag(raw_tags, tag).values()):
+        related = [x for x in (rec.macrolanguage, *members) if x and coverage.total(x)]
+        if related:
+            best = max(related, key=lambda x: (coverage.total(x), x))
+            print(
+                f"[hint] no names are tagged {tag}; try `--to {best}` "
+                f"({registry.record(best).name}, {coverage.total(best):,} names)"
+            )
+        else:
+            print(f"[hint] no names are tagged {tag} in either dataset")
+    return 0
+
+
+def _lang_search(
+    registry: LanguageRegistry, coverage: Coverage, text: str, limit: int
+) -> int:
+    hits = search_languages(registry, text)
+    if not hits:
+        print(f"[search] no language code or name contains {text!r}")
+        return 0
+    # Within each match quality, languages with more names first
+    hits.sort(key=lambda h: (h.rank, -coverage.total(h.code), h.code))
+    shown = hits if limit <= 0 else hits[:limit]
+    print(
+        f"[search] {text!r}: {len(hits)} match(es)"
+        + (f", showing {len(shown)}" if len(shown) < len(hits) else "")
+    )
+    width = max(len(h.code) for h in shown)
+    for h in shown:
+        rec = registry.record(h.code)
+        via = "" if h.matched in (rec.name, h.code) else f"  (as {h.matched!r})"
+        print(
+            f"  {h.code:<{width}}  {rec.name}{via}  [{coverage.total(h.code):,} names]"
+        )
+    return 0
+
+
+def _lang_list(registry: LanguageRegistry, coverage: Coverage, limit: int) -> int:
+    if not coverage.sources:
+        print("error: no dataset built; run `nte init`", file=sys.stderr)
+        return 1
+    langs = sorted(coverage.by_lang, key=lambda lang: (-coverage.total(lang), lang))
+    shown = langs if limit <= 0 else langs[:limit]
+    print(
+        f"[languages] {len(langs)} languages have names"
+        + (
+            f", showing the top {len(shown)} (--limit 0 for all)"
+            if len(shown) < len(langs)
+            else ""
+        )
+    )
+    width = max((len(x) for x in shown), default=4)
+    for lang in shown:
+        name = registry.record(lang).name if lang in registry else "?"
+        print(
+            f"  {lang:<{width}}  {_format_counts(coverage.per_source(lang), coverage.sources)}  {name}"
+        )
+    return 0
+
+
+def _format_counts(counts: dict[str, int], sources: tuple[str, ...]) -> str:
+    return " · ".join(f"{source} {counts.get(source, 0):,}" for source in sources)
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
@@ -176,12 +413,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="the name to convert (use -- before " "names that start with a dash)",
     )
     p_lookup.add_argument(
-        "--to", required=True, metavar="LANG", help="target language code, e.g. 'latin'"
+        "--to",
+        required=True,
+        metavar="LANG",
+        help="target language: ISO 639-1/2/3 code or exact English name, "
+        "optionally with subtags, e.g. 'os', 'oss', 'ossetian', 'zh-Hant'",
     )
     p_lookup.add_argument(
-        "--all", action="store_true", help="show all matched candidates"
+        "--all",
+        action="store_true",
+        help="also show matched entities that have no name in the target language",
     )
     p_lookup.set_defaults(func=cmd_lookup)
+
+    # Language information
+    p_lang = sub.add_parser(
+        "lang",
+        aliases=["language"],
+        help="show what a language code or name resolves to, and how many names it has",
+        description="Resolve a language the way `lookup --to` does, and show its "
+        "codes, names, macrolanguage relations and name counts per dataset.",
+    )
+    p_lang.add_argument(
+        "query",
+        nargs="?",
+        metavar="LANG",
+        help="code or exact English name, e.g. 'os', 'oss', 'ossetian', 'zh-Hant'",
+    )
+    p_lang_mode = p_lang.add_mutually_exclusive_group()
+    p_lang_mode.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="list languages whose code or name contains TEXT",
+    )
+    p_lang_mode.add_argument(
+        "--list",
+        action="store_true",
+        help="list the languages that have names in the database, most names first",
+    )
+    p_lang.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="rows to show for --search/--list (0 = all; default 25)",
+    )
+    p_lang.set_defaults(func=cmd_lang)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")

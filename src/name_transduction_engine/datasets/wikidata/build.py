@@ -11,7 +11,7 @@ from name_transduction_engine.paths import (
     WIKIDATA_LOCATIONS_BUILD_PATH,
     WIKIDATA_RAW_DUMP_PATH,
 )
-from name_transduction_engine.normalization import normalize_name
+from name_transduction_engine.normalization.name_normalization import normalize_name
 
 LOCATION_CLASS_QIDS = {
     "Q6256": "country",

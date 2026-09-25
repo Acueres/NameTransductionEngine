@@ -1,12 +1,20 @@
 import sqlite3
 
+from name_transduction_engine.datasets.language_codes.data_provision import (
+    language_tag_report_ddl,
+)
+
+# One row per distinct raw wd_lang value: what it mapped to, how many labels
+# carried it. Read by `nte data status`
+LANGUAGE_TAG_TABLE = "wikidata_language_tag"
+
 
 def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         DROP TABLE IF EXISTS wikidata_location_name;
         DROP TABLE IF EXISTS wikidata_location_p31;
         DROP TABLE IF EXISTS wikidata_location_geonames;
-        DROP TABLE IF EXISTS wikidata_lang_norm;
+        DROP TABLE IF EXISTS wikidata_lang_norm;  -- replaced by the language registry
         DROP TABLE IF EXISTS wikidata_location;
 
         CREATE TABLE wikidata_location (
@@ -23,14 +31,15 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
         CREATE TABLE wikidata_location_geonames (
             qid TEXT NOT NULL,
-            geonames_id TEXT NOT NULL,
+
+            geonames_id INTEGER NOT NULL,
 
             PRIMARY KEY (qid, geonames_id),
 
             FOREIGN KEY (qid)
-            REFERENCES wikidata_location(qid)
-            ON DELETE CASCADE
-            );
+                REFERENCES wikidata_location(qid)
+                ON DELETE CASCADE
+        );
 
         CREATE TABLE wikidata_location_p31 (
             qid TEXT NOT NULL,
@@ -43,67 +52,53 @@ def create_schema(conn: sqlite3.Connection) -> None:
                 ON DELETE CASCADE
         );
 
-        CREATE TABLE wikidata_lang_norm (
-            wd_lang TEXT PRIMARY KEY,
-
-            -- NTE/GeoNames-style lookup bucket.
-            -- Usually ISO-639-1 if available, else ISO-639-3.
-            -- May contain explicit exceptions such as map-bms / roa-tara.
-            geo_lang TEXT,
-
-            iso639_3 TEXT,
-            iso639_1 TEXT
-        );
-
         CREATE TABLE wikidata_location_name (
             qid TEXT NOT NULL,
 
-            -- Original Wikidata/Wikimedia language code.
+            -- Original Wikidata/Wikimedia language code, kept for provenance.
             -- Examples: en, fr, zh-hant, be-tarask, sr-el.
             wd_lang TEXT NOT NULL,
 
-            -- Collapsed NTE/GeoNames-style language bucket.
-            -- Examples: en, fr, zh, be, sr, grc, ang.
-            geo_lang TEXT,
+            -- Registry code and subtags, computed at load time from wd_lang.
+            -- Examples: sr-el -> lang=sr, lang_script=Latn;
+            -- be-tarask -> lang=be, lang_variant=tarask.
+            lang TEXT,
+            lang_script TEXT,
+            lang_region TEXT,
+            lang_variant TEXT,
+            tag_status TEXT NOT NULL
+                CHECK (tag_status IN ('language', 'untagged', 'multiple', 'unmapped')),
 
-            -- Original Wikidata label text, preserved in original script.
+            -- Original Wikidata label text, preserved in original script
             name TEXT NOT NULL,
 
-            -- Conservative search key:
-            -- Unicode-normalized, whitespace-normalized, casefolded.
-            -- Not Latinized/transliterated.
-            name_norm TEXT NOT NULL,
+            -- Search key
+            normalized_name TEXT NOT NULL,
 
-            -- For now this will be "label".
-            -- Later aliases can be added as "alias" with lower priority.
             term_type TEXT NOT NULL DEFAULT 'label',
 
             PRIMARY KEY (qid, wd_lang, term_type, name),
 
             FOREIGN KEY (qid)
                 REFERENCES wikidata_location(qid)
-                ON DELETE CASCADE,
-
-            FOREIGN KEY (wd_lang)
-                REFERENCES wikidata_lang_norm(wd_lang)
+                ON DELETE CASCADE
         );
-        """)
+        """ + language_tag_report_ddl(LANGUAGE_TAG_TABLE))
 
 
 def build_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE INDEX idx_wd_location_geonames_id
         ON wikidata_location_geonames (geonames_id);
-        
+
         CREATE INDEX idx_wd_location_p31_qid
         ON wikidata_location_p31 (p31_qid);
 
-        CREATE INDEX idx_wd_lang_norm_geo_lang
-        ON wikidata_lang_norm (geo_lang);
-
         CREATE INDEX idx_wd_name_resolve
-        ON wikidata_location_name (name_norm, qid);
+        ON wikidata_location_name (normalized_name, qid);
 
         CREATE INDEX idx_wd_name_hop
-        ON wikidata_location_name (qid, geo_lang);
+        ON wikidata_location_name (qid, lang);
+
+        ANALYZE;
         """)
