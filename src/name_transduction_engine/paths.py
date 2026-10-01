@@ -5,10 +5,14 @@ RAW_DIR_GEONAMES = PROJECT_ROOT / "data" / "raw" / "geonames"
 RAW_DIR_WIKIDATA = PROJECT_ROOT / "data" / "raw" / "wikidata"
 RAW_DIR_LANGUAGE_CODES = PROJECT_ROOT / "data" / "raw" / "language_codes"
 BUILD_DIR = PROJECT_ROOT / "data" / "build"
+MODELS_DIR = PROJECT_ROOT / "data" / "models"
 
 DB_PATH = PROJECT_ROOT / "data" / "names.sqlite"
-BUILTIN_PACKS_DIR=PROJECT_ROOT / "packs"
+BUILTIN_PACKS_DIR = PROJECT_ROOT / "packs"
 
 WIKIDATA_RAW_DUMP_PATH = RAW_DIR_WIKIDATA / "latest-all.json.bz2"
 WIKIDATA_LOCATIONS_PATH = RAW_DIR_WIKIDATA / "wikidata_locations.jsonl.gz"
 WIKIDATA_LOCATIONS_BUILD_PATH = BUILD_DIR / "wikidata_locations.jsonl.gz"
+
+# Models learned from the datasets (built by `nte init`, after the datasets)
+PERSIAN_MODEL_PATH = MODELS_DIR / "persian.json.gz"

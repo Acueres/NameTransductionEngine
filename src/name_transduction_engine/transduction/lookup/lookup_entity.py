@@ -13,3 +13,7 @@ class LookupEntity:
     longitude: float | None
 
     names: tuple[LookupName, ...]
+
+    # Latin-script names of the entity (GeoNames primary name, English
+    # names), used as reading hints by the display romanizer
+    reference_names: tuple[str, ...] = ()

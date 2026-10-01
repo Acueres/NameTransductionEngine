@@ -10,6 +10,7 @@ from name_transduction_engine.datasets.dataset_provider import (
 from name_transduction_engine.language_packs.language_pack_provider import (
     ensure_builtin_packs,
 )
+from name_transduction_engine.models.model_provider import ensure_models
 from name_transduction_engine.datasets.maintenance import (
     collect_data_status,
     format_data_status,
@@ -17,7 +18,10 @@ from name_transduction_engine.datasets.maintenance import (
     format_clean_report,
 )
 from name_transduction_engine import paths
-from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
+from name_transduction_engine.transduction.lookup.lookup_engine import (
+    ROMANIZATION_MODES,
+    lookup_name,
+)
 from name_transduction_engine.normalization.language_code_normalization import (
     LanguageRegistry,
     RegistryError,
@@ -47,6 +51,8 @@ from name_transduction_engine.datasets.language_codes.info import (
 
 def cmd_init(args: argparse.Namespace) -> int:
     ensure_datasets(args.force)
+    # Models are learned from the datasets, so they come after them
+    ensure_models(args.force)
     ensure_builtin_packs()
     return 0
 
@@ -60,6 +66,8 @@ def cmd_data_fetch(args: argparse.Namespace) -> int:
 def cmd_data_build(args: argparse.Namespace) -> int:
     if args.target == "wikidata-compact":
         build_wikidata_compact_dataset()
+    elif args.target == "models":
+        ensure_models(args.force)
     return 0
 
 
@@ -80,7 +88,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        result = lookup_name(args.name, args.to)
+        result = lookup_name(args.name, args.to, romanization=args.romanization)
     except UnknownLanguageError as exc:
         # The message already carries did-you-mean suggestions
         print(f"error: {exc}", file=sys.stderr)
@@ -95,6 +103,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
     print(
         f"[lookup] name={args.name!r} "
         f"to={result.language.tag} "
+        f"romanization={args.romanization} "
         f"entities={len(entities)}"
     )
 
@@ -363,10 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
     # Initialization
     p_init = sub.add_parser(
         "init",
-        help="fetch lookup data and build names.sqlite",
+        help="fetch lookup data, build names.sqlite and the models learned from it",
     )
     p_init.add_argument(
-        "--force", action="store_true", help="rebuild even if a valid DB already exists"
+        "--force",
+        action="store_true",
+        help="rebuild even if a valid DB and models already exist",
     )
     p_init.set_defaults(func=cmd_init)
 
@@ -386,9 +397,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_build = data_sub.add_parser(
         "build",
-        help="build a compact dataset from a downloaded raw dump",
+        help="build a compact dataset from a downloaded raw dump, or the "
+        "models learned from the datasets",
     )
-    p_build.add_argument("target", choices=["wikidata-compact"])
+    p_build.add_argument("target", choices=["wikidata-compact", "models"])
+    p_build.add_argument(
+        "--force",
+        action="store_true",
+        help="models: rebuild even if they are up to date",
+    )
     p_build.set_defaults(func=cmd_data_build)
 
     p_status = data_sub.add_parser("status", help="show dataset state")
@@ -423,6 +440,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help="also show matched entities that have no name in the target language",
+    )
+    p_lookup.add_argument(
+        "--romanization",
+        choices=ROMANIZATION_MODES,
+        default="debug",
+        help="how non-Latin names are romanized: 'debug' (default) is uroman, a "
+        "readable handle for any script; 'pretty' is the conventional "
+        "romanization shown to end users (Tōkyō, Kyiv, Beijing)",
     )
     p_lookup.set_defaults(func=cmd_lookup)
 

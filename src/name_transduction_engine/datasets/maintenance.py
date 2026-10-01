@@ -30,6 +30,10 @@ from .wikidata.load import (
     is_wikidata_ready,
 )
 from .wikidata.schema import LANGUAGE_TAG_TABLE as WIKIDATA_LANGUAGE_TAG_TABLE
+from name_transduction_engine.models.model_provider import (
+    ModelStatus,
+    collect_model_status,
+)
 
 # Tables whose row counts are worth reporting, per source
 _LANGUAGE_CODES_TABLES = (
@@ -96,6 +100,7 @@ class DataStatus:
     build_metadata: dict[str, str]  # empty if table absent
     raw_artifacts: list[ArtifactStatus]
     partial_files: list[ArtifactStatus]
+    models: list[ModelStatus] = field(default_factory=list)
 
 
 def _artifact(name: str, path: Path) -> ArtifactStatus:
@@ -257,6 +262,7 @@ def collect_data_status() -> DataStatus:
         build_metadata=build_metadata,
         raw_artifacts=raw_artifacts,
         partial_files=partial_files,
+        models=collect_model_status(),
     )
 
 
@@ -286,6 +292,11 @@ def format_data_status(status: DataStatus) -> str:
         for key, value in sorted(status.build_metadata.items()):
             lines.append(f"    {key}: {value}")
 
+    if status.models:
+        lines.append("Models:")
+        for model in status.models:
+            lines.extend(_format_model(model))
+
     lines.append("Raw files:")
     for artifact in status.raw_artifacts:
         if artifact.exists:
@@ -299,6 +310,27 @@ def format_data_status(status: DataStatus) -> str:
             lines.append(f"  {artifact.name}: {_human_bytes(artifact.size_bytes)}")
 
     return "\n".join(lines)
+
+
+def _format_model(model: ModelStatus) -> list[str]:
+    marker = "ready" if model.ready else "NOT READY"
+    if model.reason:
+        marker += f" ({model.reason})"
+    lines = [f"  {model.name}: {marker}"]
+    if model.size_bytes is not None:
+        lines.append(f"    file: {model.path} ({_human_bytes(model.size_bytes)})")
+    meta = model.meta
+    if meta:
+        lines.append(f"    built: {meta.get('built_at', '?')}")
+        if "names_aligned" in meta:
+            lines.append(
+                f"    training: {meta['names_aligned']:,}/{meta.get('names_total', 0):,}"
+                f" names aligned; {meta.get('contexts', 0):,} contexts, "
+                f"{meta.get('words', 0):,} words"
+            )
+        if "source" in meta:
+            lines.append(f"    source: {meta['source']}")
+    return lines
 
 
 def _format_language_tags(summary: LanguageTagSummary) -> list[str]:

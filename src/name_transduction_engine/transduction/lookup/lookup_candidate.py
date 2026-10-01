@@ -13,3 +13,6 @@ class LookupCandidate:
 
     language_code: str | None
     candidate_name: str | None
+
+    # The entity's GeoNames primary name and English names
+    reference_names: tuple[str, ...] = ()

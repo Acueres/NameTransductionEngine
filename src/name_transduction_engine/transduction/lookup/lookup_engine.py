@@ -6,6 +6,7 @@ from functools import lru_cache
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path
+from typing import Literal
 
 from .db import run_query, get_conn
 from .lookup_entity import LookupEntity
@@ -18,7 +19,12 @@ from name_transduction_engine.normalization.language_code_normalization import (
     LanguageTag,
     resolve_user_language,
 )
-from name_transduction_engine.transliteration.romanization import Romanizer
+from name_transduction_engine.transliteration.diagnostic_romanizer import (
+    DiagnosticRomanizer,
+)
+from name_transduction_engine.transliteration.display_romanizer import (
+    DisplayRomanizer,
+)
 from name_transduction_engine.datasets.dataset_provider import read_registry
 from name_transduction_engine.paths import DB_PATH
 
@@ -27,6 +33,11 @@ from name_transduction_engine.paths import DB_PATH
 # language. The optional script/region/variant filters narrow step 2 only.
 #
 # Ordering: GeoNames before Wikidata, then entity ID numerically, then names in record order.
+#
+# Each row also carries the entity's reference names: the GeoNames primary
+# name and up to five English names ("|"-separated). The display romanizer
+# may use them to read scripts that leave vowels unwritten (Persian ونیز,
+# guided by "Venice").
 
 QUERY = """
 WITH resolved_geonames AS (
@@ -59,7 +70,17 @@ SELECT
     alt.lang_region                             AS lang_region,
     alt.lang_variant                            AS lang_variant,
     alt.alternate_name                          AS candidate_name,
-    MIN(alt.alternate_name_id)                  AS name_order
+    MIN(alt.alternate_name_id)                  AS name_order,
+    gn.name || COALESCE('|' || (
+        SELECT group_concat(en.alternate_name, '|')
+        FROM (
+            SELECT alternate_name
+            FROM alternate_name
+            WHERE geonameid = rg.geonameid AND lang = 'en'
+            ORDER BY alternate_name_id
+            LIMIT 5
+        ) en
+    ), '')                                      AS reference_names
 FROM resolved_geonames rg
 JOIN geoname gn ON gn.geonameid = rg.geonameid
 LEFT JOIN alternate_name alt
@@ -90,7 +111,17 @@ SELECT DISTINCT
     wd_name.lang_region                         AS lang_region,
     wd_name.lang_variant                        AS lang_variant,
     wd_name.name                                AS candidate_name,
-    NULL                                        AS name_order
+    NULL                                        AS name_order,
+    (
+        SELECT group_concat(en.name, '|')
+        FROM (
+            SELECT name
+            FROM wikidata_location_name
+            WHERE qid = rw.qid AND lang = 'en'
+            ORDER BY term_type <> 'label', name
+            LIMIT 5
+        ) en
+    )                                           AS reference_names
 FROM resolved_wikidata rw
 JOIN wikidata_location wd_loc ON wd_loc.qid = rw.qid
 LEFT JOIN wikidata_location_name wd_name
@@ -111,13 +142,24 @@ ORDER BY
 """
 
 
+# "debug": uroman, a readable handle for any script (DiagnosticRomanizer)
+# "pretty": the conventional romanization for end users (DisplayRomanizer)
+RomanizationMode = Literal["debug", "pretty"]
+ROMANIZATION_MODES: tuple[RomanizationMode, ...] = ("debug", "pretty")
+
+
 @dataclass(frozen=True)
 class LookupResult:
     language: LanguageQuery
     entities: list[LookupEntity]
 
 
-def lookup_name(name: str, lang: str, db_path: str | Path = DB_PATH) -> LookupResult:
+def lookup_name(
+    name: str,
+    lang: str,
+    db_path: str | Path = DB_PATH,
+    romanization: RomanizationMode = "debug",
+) -> LookupResult:
     language = resolve_user_language(lang, _registry(db_path))
     tag = language.tag
 
@@ -141,12 +183,15 @@ def lookup_name(name: str, lang: str, db_path: str | Path = DB_PATH) -> LookupRe
             longitude=_optional_float(row.longitude),
             language_code=_language_code(row),
             candidate_name=_optional_str(row.candidate_name),
+            reference_names=_split_names(row.reference_names),
         )
         for row in df.itertuples(index=False)
     ]
 
     grouped_candidates = _group_lookup_candidates(candidates)
-    romanized_candidates = _romanize_lookup_names(grouped_candidates)
+    romanized_candidates = _romanize_lookup_names(
+        grouped_candidates, _romanizer(romanization), query_name=name
+    )
     return LookupResult(language=language, entities=romanized_candidates)
 
 
@@ -200,21 +245,41 @@ def _group_lookup_candidates(
                 latitude=first.latitude,
                 longitude=first.longitude,
                 names=names,
+                reference_names=first.reference_names,
             )
         )
 
     return entities
 
 
-def _romanize_lookup_names(entities: list[LookupEntity]):
+@lru_cache(maxsize=None)
+def _romanizer(mode: RomanizationMode) -> DiagnosticRomanizer | DisplayRomanizer:
+    if mode == "pretty":
+        return DisplayRomanizer()
+    if mode == "debug":
+        return DiagnosticRomanizer()
+    raise ValueError(f"unknown romanization mode {mode!r}")
+
+
+def _romanize_lookup_names(
+    entities: list[LookupEntity],
+    rm: DiagnosticRomanizer | DisplayRomanizer,
+    query_name: str | None = None,
+) -> list[LookupEntity]:
+    """Romanize every name. The display romanizer also gets the entity's
+    reference names and the query (which resolved to this entity) as hints"""
     result: list[LookupEntity] = []
-    rm = Romanizer()
 
     for entity in entities:
+        hints = (*entity.reference_names, *([query_name] if query_name else []))
         romanized_names = tuple(
             LookupName(
                 name=n.name,
-                romanization=rm.romanize(n.name),
+                romanization=(
+                    rm.romanize(n.name, n.language_code, hints)
+                    if isinstance(rm, DisplayRomanizer)
+                    else rm.romanize(n.name, n.language_code)
+                ),
                 language_code=n.language_code,
             )
             for n in entity.names
@@ -227,11 +292,19 @@ def _romanize_lookup_names(entities: list[LookupEntity]):
             latitude=entity.latitude,
             longitude=entity.longitude,
             names=romanized_names,
+            reference_names=entity.reference_names,
         )
 
         result.append(new_entity)
 
     return result
+
+
+def _split_names(value) -> tuple[str, ...]:
+    text = _optional_str(value)
+    if not text:
+        return ()
+    return tuple(dict.fromkeys(n for n in text.split("|") if n))
 
 
 def _optional_float(value) -> float | None:
