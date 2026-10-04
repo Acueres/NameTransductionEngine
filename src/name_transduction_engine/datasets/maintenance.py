@@ -9,8 +9,10 @@ from name_transduction_engine.paths import (
     RAW_DIR_LANGUAGE_CODES,
     RAW_DIR_WIKIDATA,
     BUILD_DIR,
+    WIKIDATA_COMPACT_DIR,
     WIKIDATA_LOCATIONS_PATH,
-    WIKIDATA_RAW_DUMP_PATH,
+    WIKIDATA_RAW_DUMP_GLOB,
+    WIKIDATA_WORK_DIR,
 )
 from .language_codes.download import (
     IANA_REGISTRY_FILENAME,
@@ -26,10 +28,18 @@ from .geonames.load import (
 )
 from .geonames.schema import LANGUAGE_TAG_TABLE as GEONAMES_LANGUAGE_TAG_TABLE
 from .wikidata.load import (
+    DATASET_ID_KEY as WIKIDATA_DATASET_ID_KEY,
     REGISTRY_FINGERPRINT_KEY as WIKIDATA_REGISTRY_FINGERPRINT_KEY,
     is_wikidata_ready,
 )
 from .wikidata.schema import LANGUAGE_TAG_TABLE as WIKIDATA_LANGUAGE_TAG_TABLE
+from .wikidata.build import committed_shards, read_state as read_wikidata_state
+from .wikidata.classes import ClassFileError, load_class_map
+from .wikidata.compact import (
+    format_manifest_summary,
+    open_compact_dataset,
+    read_manifest,
+)
 from name_transduction_engine.models.model_provider import (
     ModelStatus,
     collect_model_status,
@@ -44,10 +54,12 @@ _LANGUAGE_CODES_TABLES = (
 )
 _GEONAMES_TABLES = ("geoname", "alternate_name", GEONAMES_LANGUAGE_TAG_TABLE)
 _WIKIDATA_TABLES = (
-    "wikidata_location",
-    "wikidata_location_name",
-    "wikidata_location_geonames",
-    "wikidata_location_p31",
+    "wikidata_entity",
+    "wikidata_name",
+    "wikidata_link",
+    "wikidata_entity_class",
+    "wikidata_geonames",
+    "wikidata_external_id",
     WIKIDATA_LANGUAGE_TAG_TABLE,
 )
 
@@ -94,6 +106,18 @@ class SourceStatus:
 
 
 @dataclass(frozen=True)
+class WikidataBuildStatus:
+    """The streaming build (`nte data build wikidata-compact`): the run in
+    progress or last finished, and the compact dataset it produced"""
+
+    state: dict | None  # work/state.json
+    shard_bytes: int
+    manifest: dict | None  # compact/manifest.json
+    compact_bytes: int
+    classes: str  # state of the class file the build needs
+
+
+@dataclass(frozen=True)
 class DataStatus:
     db: ArtifactStatus
     sources: list[SourceStatus]
@@ -101,6 +125,7 @@ class DataStatus:
     raw_artifacts: list[ArtifactStatus]
     partial_files: list[ArtifactStatus]
     models: list[ModelStatus] = field(default_factory=list)
+    wikidata_build: WikidataBuildStatus | None = None
 
 
 def _artifact(name: str, path: Path) -> ArtifactStatus:
@@ -169,9 +194,50 @@ def _registry_mismatch(metadata: dict[str, str], built_with_key: str) -> str | N
     return "built with a different language registry; run `nte init` to rebuild"
 
 
+def _wikidata_expected_dataset() -> str | None:
+    try:
+        dataset = open_compact_dataset(WIKIDATA_COMPACT_DIR, WIKIDATA_LOCATIONS_PATH)
+    except (OSError, ValueError):
+        return None
+    return dataset.dataset_id if dataset else None
+
+
+def _class_file_state() -> str:
+    try:
+        class_map = load_class_map()
+    except ClassFileError as exc:
+        return f"not usable: {exc}"
+    return (
+        f"{len(class_map.kinds):,} classes, generated {class_map.generated_at} "
+        f"from {class_map.endpoint}"
+    )
+
+
+def _collect_wikidata_build() -> WikidataBuildStatus:
+    state = read_wikidata_state(WIKIDATA_WORK_DIR)
+    try:
+        manifest = read_manifest(WIKIDATA_COMPACT_DIR)
+    except (OSError, ValueError):
+        manifest = None
+    shard_bytes = (
+        sum(p.stat().st_size for p in committed_shards(WIKIDATA_WORK_DIR, state))
+        if state
+        else 0
+    )
+    compact_bytes = (
+        sum(p.stat().st_size for p in WIKIDATA_COMPACT_DIR.iterdir() if p.is_file())
+        if manifest
+        else 0
+    )
+    return WikidataBuildStatus(
+        state, shard_bytes, manifest, compact_bytes, _class_file_state()
+    )
+
+
 def collect_data_status() -> DataStatus:
     """Gather a read-only snapshot of everything the data layer owns"""
     db = _artifact("names.sqlite", DB_PATH)
+    wikidata_expected = _wikidata_expected_dataset()
 
     sources: list[SourceStatus] = []
     build_metadata: dict[str, str] = {}
@@ -200,7 +266,7 @@ def collect_data_status() -> DataStatus:
                     ),
                     (
                         "wikidata",
-                        is_wikidata_ready(DB_PATH),
+                        is_wikidata_ready(DB_PATH, wikidata_expected),
                         _WIKIDATA_TABLES,
                         WIKIDATA_LANGUAGE_TAG_TABLE,
                         WIKIDATA_REGISTRY_FINGERPRINT_KEY,
@@ -213,6 +279,17 @@ def collect_data_status() -> DataStatus:
                             if not language_codes_ready
                             else _registry_mismatch(build_metadata, fingerprint_key)
                         )
+                        if (
+                            reason is None
+                            and source == "wikidata"
+                            and wikidata_expected is not None
+                            and build_metadata.get(WIKIDATA_DATASET_ID_KEY)
+                            not in (None, wikidata_expected)
+                        ):
+                            reason = (
+                                "a different Wikidata compact dataset is "
+                                "available; run `nte init` to load it"
+                            )
                     sources.append(
                         SourceStatus(
                             source=source,
@@ -244,9 +321,13 @@ def collect_data_status() -> DataStatus:
             "admin2Codes.txt",
         )
     ]
-    raw_artifacts.append(_artifact("latest-all.json.bz2", WIKIDATA_RAW_DUMP_PATH))
+    if RAW_DIR_WIKIDATA.is_dir():
+        raw_artifacts += [
+            _artifact(path.name, path)
+            for path in sorted(RAW_DIR_WIKIDATA.glob(WIKIDATA_RAW_DUMP_GLOB))
+        ]
     raw_artifacts.append(
-        _artifact("wikidata_locations.jsonl.gz", WIKIDATA_LOCATIONS_PATH)
+        _artifact("wikidata_locations.jsonl.gz (legacy)", WIKIDATA_LOCATIONS_PATH)
     )
 
     partial_files = [
@@ -263,6 +344,7 @@ def collect_data_status() -> DataStatus:
         raw_artifacts=raw_artifacts,
         partial_files=partial_files,
         models=collect_model_status(),
+        wikidata_build=_collect_wikidata_build(),
     )
 
 
@@ -292,6 +374,9 @@ def format_data_status(status: DataStatus) -> str:
         for key, value in sorted(status.build_metadata.items()):
             lines.append(f"    {key}: {value}")
 
+    if status.wikidata_build is not None:
+        lines.extend(_format_wikidata_build(status.wikidata_build))
+
     if status.models:
         lines.append("Models:")
         for model in status.models:
@@ -310,6 +395,49 @@ def format_data_status(status: DataStatus) -> str:
             lines.append(f"  {artifact.name}: {_human_bytes(artifact.size_bytes)}")
 
     return "\n".join(lines)
+
+
+def _format_wikidata_build(build: WikidataBuildStatus) -> list[str]:
+    lines = ["Wikidata build:", f"  class file: {build.classes}"]
+    state = build.state
+    if state is not None:
+        dump = state["dump"]
+        progress = state["position"] / dump["size"] if dump["size"] else 0.0
+        status = {
+            "running": f"in progress, {progress:.1%} read",
+            "read": "dump read, compact dataset not written yet",
+            "finished": "finished",
+        }.get(state["status"], state["status"])
+        lines.append(f"  run: dump {dump['snapshot']} ({status})")
+        lines.append(f"    source: {dump['url']}")
+        kept = ", ".join(
+            f"{key.split(':', 1)[1]} {count:,}"
+            for key, count in sorted(state.get("stats", {}).items())
+            if key.startswith("kept:")
+        )
+        lines.append(
+            f"    entities read: {state['lines']:,}; kept: {kept or 'none yet'}"
+        )
+        lines.append(
+            f"    shards: {state['shards']} ({_human_bytes(build.shard_bytes)}); "
+            f"last checkpoint {state.get('updated_at', '?')}; "
+            f"active {state.get('active_seconds', 0) / 3600:.1f} h"
+        )
+    manifest = build.manifest
+    if manifest is not None:
+        partial = (
+            f", partial: {manifest.get('progress', 0):.1%} of the dump"
+            if manifest.get("partial")
+            else ""
+        )
+        lines.append(
+            f"  compact dataset: {manifest['dataset_id']} "
+            f"({_human_bytes(build.compact_bytes)}{partial})"
+        )
+        lines.extend(f"    {line}" for line in format_manifest_summary(manifest))
+    else:
+        lines.append("  compact dataset: none yet")
+    return lines
 
 
 def _format_model(model: ModelStatus) -> list[str]:

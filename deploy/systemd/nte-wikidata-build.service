@@ -1,0 +1,55 @@
+# Builds the compact Wikidata dataset in the background (days, resumable).
+#
+# Expects: a system user `nte`, the repository at /opt/nte with its uv
+# environment in /opt/nte/.venv, and the class file in
+# /opt/nte/data/raw/wikidata/ (`nte data build wikidata-classes`).
+#
+# Install:
+#   sudo cp nte-wikidata-build.service nte-wikidata-build.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nte-wikidata-build.timer
+# Start a run now:   sudo systemctl start nte-wikidata-build.service
+# Follow it:         journalctl -u nte-wikidata-build -f
+# Progress summary:  cd /opt/nte && sudo -u nte .venv/bin/nte data status
+#
+# Stopping the service saves progress; the next start resumes. A run that
+# finds the newest dump already built exits at once, so the timer can fire
+# while nothing changed.
+
+[Unit]
+Description=NTE: build the compact Wikidata dataset
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nte
+Group=nte
+# The project directory: data/ is resolved relative to it
+WorkingDirectory=/opt/nte
+ExecStart=/opt/nte/.venv/bin/nte data build wikidata-compact
+Environment=PYTHONUNBUFFERED=1
+
+# Stay out of the way of everything else: lowest CPU and I/O priority, so the
+# build only uses idle time; a memory cap so a spike kills the build (which
+# resumes) rather than another service
+Nice=19
+CPUWeight=10
+IOSchedulingClass=idle
+MemoryHigh=800M
+MemoryMax=1G
+
+# Only data/ is writable
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/nte/data
+
+# Network failures end the run with an error; try again later
+Restart=on-failure
+RestartSec=15min
+# SIGTERM: the build finishes the current chunk, writes a checkpoint and
+# exits with 130, which counts as a clean stop
+TimeoutStopSec=120
+SuccessExitStatus=130

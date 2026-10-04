@@ -1,0 +1,13 @@
+# Starts a Wikidata build every two months. A build still running when the
+# timer fires is left alone.
+
+[Unit]
+Description=NTE: rebuild the compact Wikidata dataset every two months
+
+[Timer]
+OnCalendar=*-01,03,05,07,09,11-02 03:00
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

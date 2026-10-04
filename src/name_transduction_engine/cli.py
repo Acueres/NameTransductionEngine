@@ -3,10 +3,18 @@ import sqlite3
 import sys
 
 from name_transduction_engine.datasets.dataset_provider import (
-    ensure_datasets,
+    WikidataBuildOptions,
+    build_wikidata_compact,
     download_wikidata_raw,
-    build_wikidata_compact_dataset,
+    ensure_datasets,
+    refresh_wikidata_classes,
 )
+from name_transduction_engine.datasets.wikidata.classes import (
+    DEFAULT_SPARQL_ENDPOINT,
+    ClassFileError,
+)
+from name_transduction_engine.datasets.wikidata.dump_source import DEFAULT_MIRROR
+from name_transduction_engine.datasets.wikidata.build import BuildError
 from name_transduction_engine.language_packs.language_pack_provider import (
     ensure_builtin_packs,
 )
@@ -59,13 +67,28 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_data_fetch(args: argparse.Namespace) -> int:
     if args.source == "wikidata-raw":
-        download_wikidata_raw(args.force)
+        download_wikidata_raw(args.force, mirror=args.mirror, url=args.url)
     return 0
 
 
 def cmd_data_build(args: argparse.Namespace) -> int:
     if args.target == "wikidata-compact":
-        build_wikidata_compact_dataset()
+        options = WikidataBuildOptions(
+            source=args.source,
+            mirror=args.mirror,
+            restart=args.restart,
+            stop_after_gb=args.stop_after_gb,
+            partial=args.partial,
+            refinalize=args.refinalize,
+            checkpoint_minutes=args.checkpoint_minutes,
+        )
+        try:
+            return build_wikidata_compact(options)
+        except (ClassFileError, BuildError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+    if args.target == "wikidata-classes":
+        refresh_wikidata_classes(endpoint=args.endpoint, forecast=args.forecast)
     elif args.target == "models":
         ensure_models(args.force)
     return 0
@@ -393,18 +416,84 @@ def build_parser() -> argparse.ArgumentParser:
     # Ensure the parser rejects anything that isn't a known source
     p_fetch.add_argument("source", choices=["wikidata-raw"])
     p_fetch.add_argument("--force", action="store_true")
+    p_fetch.add_argument(
+        "--mirror",
+        default=DEFAULT_MIRROR,
+        help=f"dump mirror to take the newest dated dump from (default {DEFAULT_MIRROR})",
+    )
+    p_fetch.add_argument("--url", help="download this dated dump URL instead")
     p_fetch.set_defaults(func=cmd_data_fetch)
 
     p_build = data_sub.add_parser(
         "build",
-        help="build a compact dataset from a downloaded raw dump, or the "
-        "models learned from the datasets",
+        help="build the compact Wikidata dataset (streamed from the dump), "
+        "its class file, or the models learned from the datasets",
+        description=(
+            "wikidata-compact: stream the newest dated Wikidata dump and extract "
+            "places, historical places and name data. Resumable: interrupt it "
+            "any time (Ctrl-C) and run the same command again. "
+            "wikidata-classes: regenerate the class file the build classifies "
+            "entities with (SPARQL, a few minutes). "
+            "models: the models learned from the datasets."
+        ),
     )
-    p_build.add_argument("target", choices=["wikidata-compact", "models"])
+    p_build.add_argument(
+        "target", choices=["wikidata-compact", "wikidata-classes", "models"]
+    )
     p_build.add_argument(
         "--force",
         action="store_true",
         help="models: rebuild even if they are up to date",
+    )
+    wd = p_build.add_argument_group("wikidata-compact")
+    wd.add_argument(
+        "--source",
+        help="a dated dump URL or a local .json.bz2 file "
+        "(default: the newest dated dump on the mirror)",
+    )
+    wd.add_argument(
+        "--mirror",
+        default=DEFAULT_MIRROR,
+        help=f"dump mirror (default {DEFAULT_MIRROR})",
+    )
+    wd.add_argument(
+        "--restart", action="store_true", help="discard progress and start over"
+    )
+    wd.add_argument(
+        "--stop-after-gb",
+        type=float,
+        metavar="N",
+        help="stop (resumably) after reading N GB of the compressed dump",
+    )
+    wd.add_argument(
+        "--partial",
+        action="store_true",
+        help="with --stop-after-gb: also write a compact dataset from what was "
+        "read so far, to inspect or load it",
+    )
+    wd.add_argument(
+        "--refinalize",
+        action="store_true",
+        help="rewrite the compact dataset from the build shards with the "
+        "current final gates, without reading the dump",
+    )
+    wd.add_argument(
+        "--checkpoint-minutes",
+        type=float,
+        default=10.0,
+        metavar="M",
+        help="save progress every M minutes (default 10)",
+    )
+    wc = p_build.add_argument_group("wikidata-classes")
+    wc.add_argument(
+        "--endpoint",
+        default=DEFAULT_SPARQL_ENDPOINT,
+        help=f"SPARQL endpoint (default {DEFAULT_SPARQL_ENDPOINT})",
+    )
+    wc.add_argument(
+        "--forecast",
+        action="store_true",
+        help="also print rough item counts per kind",
     )
     p_build.set_defaults(func=cmd_data_build)
 
@@ -427,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lookup = sub.add_parser("lookup", help="look up a name from available sources")
     p_lookup.add_argument(
         "name",
-        help="the name to convert (use -- before " "names that start with a dash)",
+        help="the name to convert (use -- before names that start with a dash)",
     )
     p_lookup.add_argument(
         "--to",

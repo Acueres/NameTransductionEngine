@@ -32,6 +32,9 @@ from name_transduction_engine.paths import DB_PATH
 # the normalized input. Retrieve (step 2): that entity's names in the requested
 # language. The optional script/region/variant filters narrow step 2 only.
 #
+# Wikidata: step 1 matches every name type (labels, aliases, official and
+# historical names: "Tsargrad" finds Istanbul); step 2 returns labels only.
+#
 # Ordering: GeoNames before Wikidata, then entity ID numerically, then names in record order.
 #
 # Each row also carries the entity's reference names: the GeoNames primary
@@ -54,7 +57,7 @@ WITH resolved_geonames AS (
 
 resolved_wikidata AS (
     SELECT DISTINCT qid
-    FROM wikidata_location_name
+    FROM wikidata_name
     WHERE normalized_name = :name_norm
 )
 
@@ -103,9 +106,9 @@ SELECT DISTINCT
     'wikidata'                                  AS source,
     rw.qid                                      AS entity_id,
     CAST(substr(rw.qid, 2) AS INTEGER)          AS entity_order,
-    wd_loc.kind                                 AS entity_type,
-    wd_loc.lat                                  AS latitude,
-    wd_loc.lon                                  AS longitude,
+    wd.entity_group || ', ' || wd.kind          AS entity_type,
+    wd.lat                                      AS latitude,
+    wd.lon                                      AS longitude,
     wd_name.lang                                AS lang,
     wd_name.lang_script                         AS lang_script,
     wd_name.lang_region                         AS lang_region,
@@ -116,17 +119,18 @@ SELECT DISTINCT
         SELECT group_concat(en.name, '|')
         FROM (
             SELECT name
-            FROM wikidata_location_name
-            WHERE qid = rw.qid AND lang = 'en'
-            ORDER BY term_type <> 'label', name
+            FROM wikidata_name
+            WHERE qid = rw.qid AND lang = 'en' AND name_type = 'label'
+            ORDER BY name
             LIMIT 5
         ) en
     )                                           AS reference_names
 FROM resolved_wikidata rw
-JOIN wikidata_location wd_loc ON wd_loc.qid = rw.qid
-LEFT JOIN wikidata_location_name wd_name
+JOIN wikidata_entity wd ON wd.qid = rw.qid
+LEFT JOIN wikidata_name wd_name
     ON wd_name.qid = rw.qid
    AND wd_name.lang = :lang
+   AND wd_name.name_type = 'label'
    AND (:script  IS NULL OR wd_name.lang_script  = :script)
    AND (:region  IS NULL OR wd_name.lang_region  = :region)
    AND (:variant IS NULL OR wd_name.lang_variant = :variant)
