@@ -379,19 +379,7 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
         [("Q13221722", "third-level administrative country subdivision")],
         final_gate=_any(Condition(sitelinks=2, names=2), Condition(names=4)),
     ),
-    _k(
-        PLACE,
-        "settlement",
-        [("Q486972", "human settlement")],
-        final_gate=_any(Condition(sitelinks=2, names=3), Condition(population=5000)),
-    ),
-    _k(
-        PLACE,
-        "admin",
-        [("Q56061", "administrative territorial entity")],
-        final_gate=_any(Condition(sitelinks=3, names=3)),
-    ),
-    # Current places: regions and natural features
+    # Current places: natural features
     _k(PLACE, "continent", [("Q5107", "continent")], final_gate=ALWAYS),
     _k(PLACE, "ocean", [("Q9430", "ocean")], final_gate=ALWAYS),
     _k(PLACE, "sea", [("Q165", "sea")], final_gate=_MAJOR_NATURAL),
@@ -412,12 +400,6 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
         final_gate=_MAJOR_NATURAL,
     ),
     _k(PLACE, "desert", [("Q8514", "desert")], final_gate=_MAJOR_NATURAL),
-    _k(
-        PLACE,
-        "region",
-        [("Q82794", "geographic region")],
-        final_gate=_any(Condition(sitelinks=2, names=2)),
-    ),
     _k(PLACE, "volcano", [("Q8072", "volcano")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "island", [("Q23442", "island")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "river", [("Q4022", "river")], final_gate=_MINOR_NATURAL),
@@ -427,6 +409,27 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     _k(PLACE, "plateau", [("Q75520", "plateau")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "plain", [("Q160091", "plain")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "valley", [("Q39816", "valley")], final_gate=_MINOR_NATURAL),
+    # Generic catch-alls last: their subclass trees are huge and reach classes
+    # that have a kind of their own (in Wikidata, "continent" is a subclass of
+    # "administrative territorial entity")
+    _k(
+        PLACE,
+        "settlement",
+        [("Q486972", "human settlement")],
+        final_gate=_any(Condition(sitelinks=2, names=3), Condition(population=5000)),
+    ),
+    _k(
+        PLACE,
+        "admin",
+        [("Q56061", "administrative territorial entity")],
+        final_gate=_any(Condition(sitelinks=3, names=3)),
+    ),
+    _k(
+        PLACE,
+        "region",
+        [("Q82794", "geographic region")],
+        final_gate=_any(Condition(sitelinks=2, names=2)),
+    ),
     # Kept for later, not loaded into names.sqlite yet
     _k(DYNASTY, "dynasty", [("Q171541", "dynasty"), ("Q13417114", "noble family")]),
     _k(PERSON_NAME, "given_name", [("Q202444", "given name")]),
@@ -731,6 +734,11 @@ def refresh_class_map(
                     raise RuntimeError(
                         f"root {qid} ({label}) falls inside an excluded subtree; "
                         "fix EXCLUDED_ROOTS"
+                    )
+                if qid in kinds:
+                    print(
+                        f"  note: {qid} ({label}) is a subclass of an earlier "
+                        f"kind's root and stays {kinds[qid]!r}"
                     )
                 sub = _closure(session, endpoint, qid, spec.subclasses)
                 new = 0
