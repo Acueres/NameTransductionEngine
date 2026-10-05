@@ -37,7 +37,7 @@ from . import classes as C
 
 # Bump when the records produced from the same dump would change. A build
 # in progress with another version is restarted rather than mixed
-EXTRACTOR_VERSION: Final[int] = 1
+EXTRACTOR_VERSION: Final[int] = 2
 
 # `"P31"` appears as the claims key and in every P31 snak; the item value
 # follows within a few hundred bytes. Whitespace-tolerant on purpose
@@ -54,7 +54,7 @@ _GAZETTEER_MARKS: Final = tuple(
 _LINEAGE_MARKS: Final = (b'"P53"', b'"P97"')
 _SITE_MARK: Final = b'"site"'
 
-# Sitelink keys that end in "wiki" but are not Wikipedias
+# Sitelink keys not counted as Wikipedia articles
 _NON_WIKIPEDIA: Final = frozenset(
     {
         "commonswiki",
@@ -73,6 +73,12 @@ _NON_WIKIPEDIA: Final = frozenset(
         "testwikidatawiki",
         "otrs_wikiwiki",
         "strategywiki",
+        # Wikipedias whose articles on places are mostly bot-generated stubs
+        # (millions of GeoNames-derived features): an article there says
+        # nothing about how notable a place is
+        "cebwiki",
+        "warwiki",
+        "arzwiki",
     }
 )
 

@@ -20,6 +20,7 @@ Two gate levels:
   `nte data build wikidata-compact --refinalize` (minutes, no dump access).
 """
 
+import difflib
 import hashlib
 import re
 import sys
@@ -274,7 +275,7 @@ EXTRACT_PERSON_GATE: Final = _any(
 )
 
 # Reused final gates
-_MAJOR_NATURAL: Final = _any(Condition(sitelinks=1), Condition(names=3))
+_MAJOR_NATURAL: Final = _any(Condition(sitelinks=1, names=2), Condition(names=3))
 _MINOR_NATURAL: Final = _any(Condition(sitelinks=3, names=3))
 
 # Kinds
@@ -314,7 +315,7 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
             ("Q19953632", "former administrative territorial entity"),
             ("Q182547", "Roman province"),
         ],
-        final_gate=_any(Condition(sitelinks=1), Condition(names=2)),
+        final_gate=_any(Condition(sitelinks=1, names=2), Condition(names=4)),
     ),
     _k(HISTORICAL_PLACE, "historical_region", [("Q1620908", "historical region")]),
     _k(HISTORICAL_PLACE, "ancient_city", [("Q15661340", "ancient city")]),
@@ -347,7 +348,7 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     _k(
         PLACE,
         "admin1",
-        [("Q10864048", "first-level administrative country subdivision")],
+        [("Q10864048", "first-level administrative division")],
     ),
     _k(
         PLACE,
@@ -370,13 +371,13 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     _k(
         PLACE,
         "admin2",
-        [("Q13220204", "second-level administrative country subdivision")],
+        [("Q13220204", "second-level administrative division")],
         final_gate=_any(Condition(sitelinks=1), Condition(names=3)),
     ),
     _k(
         PLACE,
         "admin3",
-        [("Q13221722", "third-level administrative country subdivision")],
+        [("Q13221722", "third-level administrative division")],
         final_gate=_any(Condition(sitelinks=2, names=2), Condition(names=4)),
     ),
     # Current places: natural features
@@ -614,6 +615,8 @@ _PREFIXES: Final = (
     "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
     "PREFIX wikibase: <http://wikiba.se/ontology#>\n"
 )
+# Labels at least this similar to the expected one count as the same item
+LABEL_SIMILARITY: Final = 0.6
 _ENTITY_RE: Final = re.compile(r"/entity/([PQ]\d+)>?")
 
 
@@ -652,8 +655,10 @@ def _entity_ids(cells: list[str]) -> list[str]:
 
 def _check_labels(session, endpoint: str) -> set[str]:
     """Compare the English labels of every root, exclusion and property with
-    what the rules expect. Returns the roots whose label does not match;
-    those are skipped so a wrong QID cannot pull in an unrelated subtree"""
+    what the rules expect. Returns the roots whose label is unrelated to the
+    expected one; those are skipped so a wrong QID cannot pull in an unrelated
+    subtree. A similar label (an item renamed on Wikidata) is accepted with a
+    note"""
     expected: dict[str, str] = {}
     for spec in KIND_SPECS:
         expected.update(dict(spec.roots))
@@ -678,12 +683,21 @@ def _check_labels(session, endpoint: str) -> set[str]:
     bad: set[str] = set()
     for qid, want in sorted(expected.items()):
         got = labels.get(qid)
-        if got is None or got.casefold() != want.casefold():
-            print(f"  label check: {qid} is {got!r}, expected {want!r}")
-            if qid.startswith("Q"):
-                bad.add(qid)
+        if got is not None and got.casefold() == want.casefold():
+            continue
+        similarity = (
+            difflib.SequenceMatcher(None, got.casefold(), want.casefold()).ratio()
+            if got is not None
+            else 0.0
+        )
+        if similarity >= LABEL_SIMILARITY:
+            print(f"  label check: {qid} is now {got!r} (was {want!r}); using it")
+            continue
+        print(f"  label check: {qid} is {got!r}, expected {want!r}; skipped")
+        if qid.startswith("Q"):
+            bad.add(qid)
     if not bad:
-        print(f"  label check: all {len(expected)} IDs match")
+        print(f"  label check: all {len(expected)} IDs are usable")
     return bad
 
 
