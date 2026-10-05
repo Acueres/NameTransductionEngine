@@ -691,6 +691,12 @@ def _check_labels(session, endpoint: str) -> set[str]:
         got = labels.get(qid)
         if got is not None and got.casefold() == want.casefold():
             continue
+        if got is None:
+            # No label at all is not a sign of a wrong ID (some endpoints lag
+            # behind Wikidata's label changes); the class count printed for
+            # the root shows whether the endpoint knows the item
+            print(f"  label check: {qid} has no English label here; using it")
+            continue
         similarity = (
             difflib.SequenceMatcher(None, got.casefold(), want.casefold()).ratio()
             if got is not None
