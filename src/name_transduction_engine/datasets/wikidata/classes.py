@@ -393,6 +393,9 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     ),
     _k(PLACE, "strait", [("Q37901", "strait")], final_gate=_MAJOR_NATURAL),
     _k(PLACE, "archipelago", [("Q33837", "archipelago")], final_gate=_MAJOR_NATURAL),
+    # Capes are a subclass of peninsula; listed first so the many small ones
+    # get the stricter gate
+    _k(PLACE, "cape", [("Q185113", "cape")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "peninsula", [("Q34763", "peninsula")], final_gate=_MAJOR_NATURAL),
     _k(
         PLACE,
@@ -406,7 +409,6 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     _k(PLACE, "river", [("Q4022", "river")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "lake", [("Q23397", "lake")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "mountain", [("Q8502", "mountain")], final_gate=_MINOR_NATURAL),
-    _k(PLACE, "cape", [("Q185113", "cape")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "plateau", [("Q75520", "plateau")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "plain", [("Q160091", "plain")], final_gate=_MINOR_NATURAL),
     _k(PLACE, "valley", [("Q39816", "valley")], final_gate=_MINOR_NATURAL),
@@ -428,11 +430,11 @@ KIND_SPECS: Final[tuple[KindSpec, ...]] = (
     _k(
         PLACE,
         "region",
-        [("Q82794", "geographic region")],
+        [("Q82794", "region")],
         final_gate=_any(Condition(sitelinks=2, names=2)),
     ),
     # Kept for later, not loaded into names.sqlite yet
-    _k(DYNASTY, "dynasty", [("Q171541", "dynasty"), ("Q13417114", "noble family")]),
+    _k(DYNASTY, "dynasty", [("Q164950", "dynasty"), ("Q13417114", "noble family")]),
     _k(PERSON_NAME, "given_name", [("Q202444", "given name")]),
     _k(PERSON_NAME, "family_name", [("Q101352", "family name")]),
     _k(ETHNONYM, "ethnic_group", [("Q41710", "ethnic group")]),
@@ -673,12 +675,16 @@ def _check_labels(session, endpoint: str) -> set[str]:
             session,
             endpoint,
             f"SELECT ?x ?l WHERE {{ VALUES ?x {{ {values} }} "
-            f'?x rdfs:label ?l FILTER(LANG(?l) = "en") }}',
+            f'?x rdfs:label ?l FILTER(LANG(?l) IN ("en", "mul")) }}',
         )
+        # Many items now keep their English label only as the language-neutral
+        # "mul" label; an English one wins when both exist
         for row in rows:
             got = _entity_ids(row[:1])
             if got and len(row) > 1:
-                labels[got[0]] = row[1].strip().strip('"').rsplit('"@', 1)[0]
+                text, _, lang = row[1].strip().rpartition("@")
+                if lang == "en" or got[0] not in labels:
+                    labels[got[0]] = text.strip('"')
 
     bad: set[str] = set()
     for qid, want in sorted(expected.items()):
