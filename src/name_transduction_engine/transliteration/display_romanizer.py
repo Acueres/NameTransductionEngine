@@ -29,6 +29,7 @@ from typing import Callable
 from .romanization_packs import (
     alphabets,
     arabic,
+    arabic_script,
     chinese,
     fallbacks,
     hebrew,
@@ -73,7 +74,8 @@ _PROVIDERS: dict[str, list[tuple[str, RunProvider]]] = {
     "Kore": [("korean", _for_script(korean.romanize_korean))],
     "Arab": [
         ("persian", _for_script(persian.romanize_persian)),
-        ("arabic", _for_script(arabic.romanize_arabic_script)),
+        ("arabic", _for_script(arabic.romanize_arabic)),
+        ("arabic-script", _for_script(arabic_script.romanize_arabic_script)),
     ],
     "Hebr": [("hebrew", _for_script(hebrew.romanize_hebrew_script))],
     "Thai": [("thai", _for_script(thai.romanize_thai))],

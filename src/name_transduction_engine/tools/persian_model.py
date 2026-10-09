@@ -22,7 +22,7 @@ from pathlib import Path
 from name_transduction_engine.models.persian_romanization import train
 from name_transduction_engine.paths import DB_PATH
 from name_transduction_engine.transliteration.romanization_packs import persian as fa
-from name_transduction_engine.transliteration.romanization_packs.arabic import (
+from name_transduction_engine.transliteration.romanization_packs.arabic_script import (
     romanize_arabic_script,
 )
 from name_transduction_engine.transliteration.romanization_packs.base import (

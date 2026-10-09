@@ -22,6 +22,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from name_transduction_engine.transliteration.romanization_packs import abjad
 from name_transduction_engine.transliteration.romanization_packs import persian as fa
 
 # Bump when the alignment, counting or model format changes in a way the
@@ -170,46 +171,12 @@ def compare_key(text: str) -> str:
 
 
 def joint_options(word: str, i: int) -> list[tuple[str, int]]:
-    """(joint output, cost) for letter i: short vowel + letter reading.
-    Cost prefers no vowel and the earlier (more usual) letter readings, so
-    ambiguous alignments are resolved the same way every time"""
-    out = []
-    for vc, v in enumerate(fa.slot_options(word, i)):
-        for lc, x in enumerate(fa.letter_options(word, i)):
-            out.append((v + x, (1 if v else 0) * 10 + vc + lc))
-    return out
+    return abjad.joint_options(fa.ORTHOGRAPHY, word, i)
 
 
 def align(word: str, latin: str) -> list[str] | None:
     """Joint outputs per letter such that they concatenate to `latin`"""
-    if any(ch not in fa.LETTERS for ch in word):
-        return None
-    n, m = len(word), len(latin)
-    inf = 10**9
-    best = [[inf] * (m + 1) for _ in range(n + 1)]
-    back: list[list[tuple[int, str] | None]] = [[None] * (m + 1) for _ in range(n + 1)]
-    best[0][0] = 0
-    for i in range(n):
-        opts = joint_options(word, i)
-        for j in range(m + 1):
-            if best[i][j] >= inf:
-                continue
-            for s, cost in opts:
-                if latin.startswith(s, j):
-                    c = best[i][j] + cost
-                    if c < best[i + 1][j + len(s)]:
-                        best[i + 1][j + len(s)] = c
-                        back[i + 1][j + len(s)] = (j, s)
-    if best[n][m] >= inf:
-        return None
-    outs: list[str] = []
-    j = m
-    for i in range(n, 0, -1):
-        prev = back[i][j]
-        assert prev is not None
-        j, s = prev
-        outs.append(s)
-    return outs[::-1]
+    return abjad.align(fa.ORTHOGRAPHY, word, latin)
 
 
 @dataclass
@@ -310,11 +277,7 @@ def count(pairs: list[Pair]) -> Counts:
             if w.ezafe is not None and aligned[k + 1].persian != "و":
                 c.ezafe[w.persian][w.ezafe] += 1
                 c.ezafe_next[aligned[k + 1].persian][bool(w.ezafe)] += 1
-            for i, out in enumerate(w.outputs):
-                if len(joint_options(w.persian, i)) == 1:
-                    continue
-                for key in fa.context_keys(w.persian, i):
-                    c.contexts[key][out] += 1
+            abjad.count_contexts(fa.ORTHOGRAPHY, c.contexts, w.persian, w.outputs)
             # Parts of compounds, for the part lexicon
             spans = fa.part_spans(w.persian)
             if len(spans) > 1:
@@ -324,45 +287,10 @@ def count(pairs: list[Pair]) -> Counts:
     return c
 
 
-def _argmax(counter: collections.Counter) -> str:
-    return min(counter.items(), key=lambda kv: (-kv[1], kv[0]))[0]
-
-
 def build_model(c: Counts, version: str) -> dict:
     """The model as stored (see `persian.make_model`), without its `meta`"""
-    # Most specific level first at runtime; prune bottom-up: keep an entry
-    # only if it changes what the smaller contexts would answer
-    levels: dict[int, dict[str, str]] = collections.defaultdict(dict)
-    for key, counter in c.contexts.items():
-        if sum(counter.values()) >= MIN_CONTEXT or key.startswith(
-            f"{len(fa.LEVELS) - 1}|"
-        ):
-            level = int(key.split("|", 1)[0])
-            levels[level][key] = _argmax(counter)
-
-    table: dict[str, str] = {}
-    for level in range(len(fa.LEVELS) - 1, -1, -1):
-        for key, out in levels[level].items():
-            fallback = _fallback(table, key, level)
-            if fallback != out:
-                table[key] = out
-
-    # Full rankings for the two smallest context levels (a few hundred keys)
-    small = {f"{len(fa.LEVELS) - 2}|", f"{len(fa.LEVELS) - 1}|"}
-    ranked = {
-        key: [
-            out for out, _ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
-        ][:8]
-        for key, counter in c.contexts.items()
-        if key[: key.index("|") + 1] in small
-    }
-
-    lexicon = {}
-    for word, counter in c.words.items():
-        total = sum(counter.values())
-        top = _argmax(counter)
-        if total >= MIN_WORD and counter[top] / total >= WORD_AGREEMENT:
-            lexicon[word] = top
+    table, ranked = abjad.build_tables(fa.ORTHOGRAPHY, c.contexts, MIN_CONTEXT)
+    lexicon = abjad.build_lexicon(c.words, MIN_WORD, WORD_AGREEMENT)
 
     total_all = sum(sum(cn.values()) for cn in c.ezafe.values())
     with_all = sum(cn["e"] + cn["ye"] for cn in c.ezafe.values())
@@ -394,9 +322,9 @@ def build_model(c: Counts, version: str) -> dict:
     return {
         "version": version,
         "source": SOURCE,
-        "table": dict(sorted(table.items())),
-        "lexicon": dict(sorted(lexicon.items())),
-        "ranked": dict(sorted(ranked.items())),
+        "table": table,
+        "lexicon": lexicon,
+        "ranked": ranked,
         "ezafe_prior": round(prior, 3),
         "ezafe_head": dict(sorted(ezafe_head.items())),
         "ezafe_next": dict(sorted(ezafe_next.items())),
@@ -405,16 +333,3 @@ def build_model(c: Counts, version: str) -> dict:
 
 def _logit(p: float) -> float:
     return math.log(p / (1 - p))
-
-
-def _fallback(table: dict[str, str], key: str, level: int) -> str | None:
-    """What the runtime would answer for this position if `key` were absent"""
-    window = key.split("|", 1)[1]
-    offsets = fa.LEVELS[level]
-    by_offset = dict(zip(offsets, window, strict=True))
-    for lower in range(level + 1, len(fa.LEVELS)):
-        lo = fa.LEVELS[lower]
-        k = f"{lower}|" + "".join(by_offset[o] for o in lo)
-        if k in table:
-            return table[k]
-    return None

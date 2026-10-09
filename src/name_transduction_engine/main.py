@@ -14,9 +14,9 @@ if __name__ == "__main__":
         main(
             [
                 "lookup",
-                "Germany",
+                "Constanţa",
                 "--to",
-                "fa",
+                "eu",
                 "--romanization",
                 "pretty",
             ]

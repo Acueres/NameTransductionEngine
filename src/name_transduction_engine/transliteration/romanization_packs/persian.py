@@ -37,6 +37,8 @@ from functools import lru_cache
 
 from name_transduction_engine.paths import PERSIAN_MODEL_PATH
 
+from . import abjad
+from .abjad import fold_latin
 from .base import Context, ProviderUnavailable, Rendering
 from .text import capitalize_first
 
@@ -127,29 +129,73 @@ def normalize(text: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Context windows used by the letter model (shared with the trainer)
+# The orthography, as the shared abjad reader needs it
 # --------------------------------------------------------------------------- #
 
-# Offsets around the letter, most specific first; each level is a subset of
-# the one before, so the trainer can prune entries that the next level
-# already answers. "#" pads the word edges.
-LEVELS: tuple[tuple[int, ...], ...] = (
-    (-4, -3, -2, -1, 0, 1, 2, 3),
-    (-3, -2, -1, 0, 1, 2),
-    (-2, -1, 0, 1, 2),
-    (-2, -1, 0, 1),
-    (-1, 0, 1),
-    (-1, 0),
-    (0,),
-)
+# Persian syllables are (C)V(C)(C): a word starts with a single consonant
+# (kh+v counts as one: Khvāf) and two short vowels never meet. Three
+# consonants in a row do occur, across compound boundaries (Poshtkūh), so
+# they are allowed. The hint-guided search, which can choose any reading,
+# also keeps a short vowel from preceding a long one (a + ū is written ow,
+# e + ī is ey), inside a letter's reading too; the letter model, which
+# follows attested readings, does better without that rule.
+_LATIN_VOWELS = frozenset("aeiouāīū")
+_SHORT_VOWELS = frozenset("aeiou")
+
+
+class PersianOrthography(abjad.Orthography):
+    name = "persian"
+    letters = LETTERS
+    consonants = CONSONANTS
+    mark_vowels = _MARK_VOWEL
+    sukun = _SUKUN
+    shadda = _SHADDA
+    marks = _MARKS
+    carriers = frozenset("اأإ")
+    part_break = ZWNJ
+
+    def letter_options(self, word: str, i: int) -> tuple[str, ...]:
+        return letter_options(word, i)
+
+    def slot_options(self, word: str, i: int) -> tuple[str, ...]:
+        return slot_options(word, i)
+
+    def forced_vowel_fits(self, vowel: str, letter: str, forced: str) -> bool:
+        # Fatha before و or ی is the diphthong BGN writes ow / ey (دَولت Dowlat)
+        if forced == "a" and not vowel and letter in ("ow", "ey"):
+            return True
+        return super().forced_vowel_fits(vowel, letter, forced)
+
+    def allowed(self, prefix: str, out: str, strict: bool = False) -> bool:
+        if not out:
+            return True
+        if strict:
+            text = prefix[-1:] + out
+            for a, b in zip(text, text[1:], strict=False):
+                if a in _SHORT_VOWELS and b in _LATIN_VOWELS:
+                    return False
+                if a in _LATIN_VOWELS and b in _SHORT_VOWELS:
+                    return False
+        elif prefix and prefix[-1] in _LATIN_VOWELS and out[0] in _SHORT_VOWELS:
+            return False
+        if (
+            not prefix
+            or out[0] in _LATIN_VOWELS
+            or any(c in _LATIN_VOWELS for c in prefix)
+        ):
+            return True
+        # Only consonants so far: the word would start with a cluster
+        return prefix == "kh" and out.startswith("v")
+
+
+ORTHOGRAPHY = PersianOrthography()
+
+# Context windows used by the letter model (shared with the trainer)
+LEVELS = ORTHOGRAPHY.levels
 
 
 def context_keys(word: str, i: int) -> list[str]:
-    padded = "####" + word + "####"
-    return [
-        f"{n}|" + "".join(padded[i + 4 + off] for off in offsets)
-        for n, offsets in enumerate(LEVELS)
-    ]
+    return ORTHOGRAPHY.context_keys(word, i)
 
 
 # --------------------------------------------------------------------------- #
@@ -337,136 +383,15 @@ HAND_EZAFE = frozenset(
 # --------------------------------------------------------------------------- #
 
 
-def _split_marks(word: str) -> tuple[str, dict[int, str], set[int]]:
-    """Separate harakat: returns the bare word, the short vowel forced after
-    each letter index ("" for sukun), and the letters marked with shadda"""
-    bare: list[str] = []
-    after: dict[int, str] = {}
-    doubled: set[int] = set()
-    for ch in word:
-        if ch in _MARKS:
-            if not bare:
-                continue
-            k = len(bare) - 1
-            if ch in _MARK_VOWEL:
-                after[k] = _MARK_VOWEL[ch]
-            elif ch == _SUKUN:
-                after[k] = ""
-            elif ch == _SHADDA:
-                doubled.add(k)
-            continue
-        bare.append(ch)
-    return "".join(bare), after, doubled
-
-
 def joint_outputs(word: str, i: int) -> list[str]:
     """Every short vowel + letter reading possible for letter i"""
-    return [v + x for v in slot_options(word, i) for x in letter_options(word, i)]
-
-
-# Persian syllables are (C)V(C)(C): a word starts with a single consonant
-# (kh+v counts as one: Khvāf) and two short vowels never meet. Three
-# consonants in a row do occur, across compound boundaries (Poshtkūh), so
-# they are allowed. The hint-guided search, which can choose any reading,
-# also keeps a short vowel from preceding a long one (a + ū is written ow,
-# e + ī is ey), inside a letter's reading too; the letter model, which
-# follows attested readings, does better without that rule.
-_LATIN_VOWELS = frozenset("aeiouāīū")
-_SHORT_VOWELS = frozenset("aeiou")
-
-
-def _allowed(prefix: str, out: str, strict: bool = False) -> bool:
-    if not out:
-        return True
-    if strict:
-        text = prefix[-1:] + out
-        for a, b in zip(text, text[1:], strict=False):
-            if a in _SHORT_VOWELS and b in _LATIN_VOWELS:
-                return False
-            if a in _LATIN_VOWELS and b in _SHORT_VOWELS:
-                return False
-    elif prefix and prefix[-1] in _LATIN_VOWELS and out[0] in _SHORT_VOWELS:
-        return False
-    if not prefix or out[0] in _LATIN_VOWELS or any(c in _LATIN_VOWELS for c in prefix):
-        return True
-    # Only consonants so far: the word would start with a cluster
-    return prefix == "kh" and out.startswith("v")
-
-
-def _predict(model: PersianModel, word: str, i: int, prefix: str) -> str:
-    valid = joint_outputs(word, i)
-    if len(valid) == 1:
-        return valid[0]
-    keys = context_keys(word, i)
-    candidates = [model.table.get(key) for key in keys]
-    # Ranked alternatives of the smallest contexts, when the best readings
-    # break the syllable rules
-    for key in keys[-2:]:
-        candidates.extend(model.ranked.get(key, ()))
-    candidates.extend(valid)
-    first = None
-    for out in candidates:
-        if out is None or out not in valid:
-            continue
-        if first is None:
-            first = out
-        if _allowed(prefix, out):
-            return out
-    return first or valid[0]
-
-
-def _split_joint(
-    joint: str, word: str, i: int, prefer_letter: bool = False
-) -> tuple[str, str]:
-    """Split a joint output into (short vowel, letter part). By default a
-    leading vowel is taken as the short vowel (a mark then replaces it: ِه
-    is e + h); with `prefer_letter`, a whole output that is the letter's own
-    reading stays whole (و read o, not o + silent و)"""
-    if prefer_letter and joint in letter_options(word, i):
-        return "", joint
-    for v in sorted(slot_options(word, i), key=len, reverse=True):
-        if v and joint.startswith(v) and joint[len(v) :] in letter_options(word, i):
-            return v, joint[len(v) :]
-    return "", joint
+    return ORTHOGRAPHY.joint_outputs(word, i)
 
 
 def romanize_letters(model: PersianModel, word: str) -> list[str]:
     """Letter-model reading of one normalized word (no lexicon), one output
     per letter of the word without harakat"""
-    bare, forced_after, doubled = _split_marks(word)
-    # A mark on a vowel carrier (initial alef) is that letter's own vowel
-    carrier_vowel: dict[int, str] = {}
-    for k in list(forced_after):
-        if bare[k] in ("ا", "أ", "إ", "ع") and (k == 0 or bare[k - 1] == ZWNJ):
-            carrier_vowel[k] = forced_after[k]
-            if bare[k] != "ع":
-                forced_after[k] = ""
-    # Fully voweled text: an unmarked consonant closes its syllable
-    consonants = [k for k, ch in enumerate(bare) if ch in CONSONANTS]
-    marked = sum(1 for k in consonants if forced_after.get(k))
-    if consonants and marked >= max(1, len(consonants) // 2):
-        for k in consonants:
-            forced_after.setdefault(k, "")
-    out: list[str] = []
-    for i, ch in enumerate(bare):
-        if ch not in LETTERS:
-            out.append(ch)  # digits, punctuation, unknown letters
-            continue
-        if i in carrier_vowel and ch != "ع":
-            out.append(carrier_vowel[i])
-            continue
-        joint = _predict(model, bare, i, "".join(out))
-        if i - 1 in forced_after or i in doubled:
-            vowel, letter = _split_joint(joint, bare, i)
-            if i - 1 in forced_after and "" in slot_options(bare, i):
-                vowel = forced_after[i - 1]
-                if vowel not in slot_options(bare, i):
-                    vowel = ""
-            if i in doubled and ch in CONSONANTS:
-                letter = CONSONANTS[ch] * 2
-            joint = vowel + letter
-        out.append(joint)
-    return out
+    return abjad.read_letters(ORTHOGRAPHY, model, word)
 
 
 def part_spans(word: str) -> list[tuple[int, int]]:
@@ -549,23 +474,9 @@ def _join_parts(pieces: list[str]) -> str:
 # the hint is the BGN name itself, so the result is attested; for foreign
 # places the vowels follow the original name.
 
-_NEAR = frozenset(
-    frozenset(p)
-    for p in ("ae", "ei", "ou", "vw", "ck", "cs", "cz", "sz", "kq", "gj", "iy", "uw")
-)
 _GUIDE_MAX_RATIO = 0.2
 _GUIDE_MAX_COST = 3.0
-_OFF_MODEL = 0.1  # a reading the letter model would not choose
-_DOUBLING = 0.5  # a doubled consonant, when the hint is a foreign name
-_SKIP_DOUBLED = 0.2  # ignoring the second of a doubled letter in such a hint
-_TAIL = 0.5  # a letter at the end of a foreign hint the Persian leaves out
-_SILENCED = 0.6  # reading a sounded letter as nothing or ʾ (ی as ʾ in Liʾon)
-
-
-def fold_latin(text: str) -> str:
-    """Lowercase ASCII-ish letters for matching: Vanīz -> vaniz"""
-    decomposed = unicodedata.normalize("NFD", text.lower())
-    return "".join(ch for ch in decomposed if "a" <= ch <= "z")
+_GUIDE_COSTS = abjad.GuideCosts()
 
 
 @dataclass(frozen=True)
@@ -603,94 +514,20 @@ def hint_words(hints: tuple[str, ...]) -> list[list[HintWord]]:
     return out
 
 
-def _sub_cost(a: str, b: str) -> float:
-    if a == b:
-        return 0.0
-    return 0.5 if frozenset((a, b)) in _NEAR else 1.0
-
-
-@lru_cache(maxsize=1 << 16)
-def _distance(out: str, seg: str, before: str, strict: bool) -> float:
-    """Edit distance between a reading and a stretch of the hint word.
-    `before` is the hint letter preceding `seg`: unless `strict`, skipping
-    the second of a doubled hint letter (Illinois) is nearly free"""
-    n, m = len(out), len(seg)
-    prev = [0.0] * (m + 1)
-    for j in range(1, m + 1):
-        prev[j] = prev[j - 1] + _skip_cost(seg, j - 1, before, strict)
-    for i in range(1, n + 1):
-        cur = [prev[0] + 1.0] + [0.0] * m
-        for j in range(1, m + 1):
-            cur[j] = min(
-                prev[j] + 1.0,  # a letter the hint does not have
-                cur[j - 1] + _skip_cost(seg, j - 1, before, strict),
-                prev[j - 1] + _sub_cost(out[i - 1], seg[j - 1]),
-            )
-        prev = cur
-    return prev[m]
-
-
-def _skip_cost(seg: str, j: int, before: str, strict: bool) -> float:
-    previous = seg[j - 1] if j > 0 else before
-    return _SKIP_DOUBLED if seg[j] == previous and not strict else 1.0
-
-
-def _shape(prefix: str) -> str:
-    """What the syllable rules need to know about a reading so far"""
-    if not prefix:
-        return ""
-    if prefix[-1] in _LATIN_VOWELS:
-        return prefix[-1]  # the vowel it ends in
-    if any(c in _LATIN_VOWELS for c in prefix):
-        return "ab"  # ends in a consonant after a vowel
-    return prefix  # consonants only (kh may still take v: Khvāf)
-
-
 def guided_reading(
     model: PersianModel, word: str, target: str, romanized: bool = False
 ) -> tuple[float, str]:
     """The reading of `word` (no harakat) closest to the folded hint word
-    `target`: (cost, reading). Readings keep to the syllable rules; one the
-    letter model would not choose costs a little, so the hint must earn it.
-    A `romanized` hint (BGN) is followed letter for letter, doubled
-    consonants included; letters a foreign hint has at its end and the
-    Persian lacks (Venice, Illinois) cost less than other differences"""
-    model_choice = romanize_letters(model, word)
-    n, m = len(word), len(target)
-    # best[i][(j, shape)]: (cost, readings) after i letters and j hint letters
-    Key = tuple[int, str]
-    best: list[dict[Key, tuple[float, tuple[str, ...]]]] = [{} for _ in range(n + 1)]
-    best[0][(0, "")] = (0.0, ())
-    for i in range(n):
-        options = joint_outputs(word, i) if word[i] in LETTERS else [word[i]]
-        for (j, shape), (cost, path) in best[i].items():
-            for out in options:
-                doubled = len(out) > 1 and out[-1] == out[-2] and out[-1].isalpha()
-                if (doubled and i == 0) or not _allowed(shape, out, strict=True):
-                    continue
-                folded = fold_latin(out)
-                penalty = 0.0 if out == model_choice[i] else _OFF_MODEL
-                letter = _split_joint(out, word, i, prefer_letter=True)[1]
-                chosen = _split_joint(model_choice[i], word, i, prefer_letter=True)[1]
-                if not fold_latin(letter) and fold_latin(chosen):
-                    penalty += _SILENCED
-                if doubled and not romanized:
-                    penalty += _DOUBLING
-                key_shape = _shape(shape + out)
-                for j2 in range(j, min(m, j + len(folded) + 2) + 1):
-                    before = target[j - 1] if j > 0 else ""
-                    c = cost + penalty
-                    c += _distance(folded, target[j:j2], before, romanized)
-                    key = (j2, key_shape)
-                    if key not in best[i + 1] or c < best[i + 1][key][0]:
-                        best[i + 1][key] = (c, (*path, out))
-    final = []
-    for (j, _), (cost, path) in best[n].items():
-        tail = _TAIL if not romanized else 1.0
-        final.append((cost + tail * (m - j), path))
-    if not final:
-        return float("inf"), ""
-    cost, path = min(final, key=lambda cp: cp[0])
+    `target`: (cost, reading); see `abjad.guided_reading`"""
+    cost, path = abjad.guided_reading(
+        ORTHOGRAPHY,
+        word,
+        target,
+        romanize_letters(model, word),
+        romanized,
+        _GUIDE_COSTS,
+        max_cost=min(_GUIDE_MAX_COST, _GUIDE_MAX_RATIO * len(target)),
+    )
     return cost, "".join(path)
 
 
@@ -745,25 +582,14 @@ def _hint_candidates(hints: tuple[str, ...]) -> list[HintWord]:
 
 _CONJUNCTION = "و"
 _SUFFIX_WORDS = frozenset({"آباد"})  # written apart but joined in BGN
-_PUNCTUATION = str.maketrans(
-    {"،": ",", "؛": ";", "؟": "?", "٪": "%", "٫": ".", "٬": ",", "«": "“", "»": "”"}
-)
 
 
 def _is_word_char(ch: str) -> bool:
-    return ch.isalnum() or ch == ZWNJ or unicodedata.category(ch).startswith("M")
+    return abjad.is_word_char(ch) or ch == ZWNJ
 
 
 def _tokenize(text: str) -> list[tuple[bool, str]]:
-    """(is_word, text) tokens: words, and the spaces and punctuation between"""
-    tokens: list[tuple[bool, str]] = []
-    for ch in text:
-        is_word = _is_word_char(ch)
-        if tokens and tokens[-1][0] == is_word:
-            tokens[-1] = (is_word, tokens[-1][1] + ch)
-        else:
-            tokens.append((is_word, ch))
-    return tokens
+    return abjad.tokenize(text, _is_word_char)
 
 
 def _merge_suffix_words(tokens: list[tuple[bool, str]]) -> list[tuple[bool, str]]:
@@ -784,16 +610,7 @@ def _merge_suffix_words(tokens: list[tuple[bool, str]]) -> list[tuple[bool, str]
     return out
 
 
-def _separator(text: str) -> str:
-    """Spaces collapse to one; Persian punctuation becomes Latin, followed by
-    a space where the source had one"""
-    converted = text.translate(_PUNCTUATION)
-    core = "".join(converted.split())
-    if not core:
-        return " "
-    lead = " " if converted[:1].isspace() and core[0] in "(“" else ""
-    trail = " " if converted[-1:].isspace() else ""
-    return lead + core + trail
+_separator = abjad.separator
 
 
 def ezafe_form(roman: str) -> str:

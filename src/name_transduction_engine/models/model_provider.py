@@ -9,13 +9,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from name_transduction_engine.paths import PERSIAN_MODEL_PATH
-
-from .persian_romanization.data_provision import (
-    ModelState,
-    ensure_persian_model,
-    persian_model_state,
-)
+from .arabic_romanization.data_provision import SPEC as ARABIC_SPEC
+from .geonames_model import GeoNamesModelSpec, ModelState, ensure_model, model_state
+from .persian_romanization.data_provision import SPEC as PERSIAN_SPEC
 
 __all__ = ["ensure_models", "collect_model_status", "ModelStatus"]
 
@@ -29,14 +25,21 @@ class _Model:
     state: Callable[[], ModelState]
 
 
+def _geonames_model(spec: GeoNamesModelSpec, description: str) -> _Model:
+    return _Model(
+        spec.name,
+        description,
+        spec.path,
+        lambda force: ensure_model(spec, force),
+        lambda: model_state(spec),
+    )
+
+
 MODELS: tuple[_Model, ...] = (
-    _Model(
-        "persian",
-        "Persian display romanization, learned from GeoNames",
-        PERSIAN_MODEL_PATH,
-        ensure_persian_model,
-        persian_model_state,
+    _geonames_model(
+        PERSIAN_SPEC, "Persian display romanization, learned from GeoNames"
     ),
+    _geonames_model(ARABIC_SPEC, "Arabic display romanization, learned from GeoNames"),
 )
 
 

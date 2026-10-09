@@ -157,14 +157,28 @@ CASES: list[tuple[str, str | None, str]] = [
     ("ಮೈಸೂರು", "kn", "Maisuru"),
     ("തിരുവനന്തപുരം", "ml", "Thiruvananthapuram"),
     ("കൊച്ചി", "ml", "Kochchi"),
-    # Arabic script
+    # Arabic script. Arabic: BGN/PCGN without dots, learned model (needs the
+    # Arabic model built by `nte init`)
     ("بغداد", "ar", "Baghdād"),
-    ("الرياض", "ar", "Al-Riyād"),
-    ("القاهرة", "ar", None),
-    ("دمشق", "ar", None),
-    ("القَاهِرَة", "ar", "Al-Qāhira"),
+    ("الرياض", "ar", "Ar-Riyād"),
+    ("القاهرة", "ar", "Al-Qāhirah"),
+    ("دمشق", "ar", "Dimashq"),
+    ("القَاهِرَة", "ar", "Al-Qāhirah"),
     ("دِمَشْق", "ar", "Dimashq"),
-    ("مكة المكرمة", "ar", None),
+    ("مكة المكرمة", "ar", "Makkah al-Mukarramah"),
+    ("مدينة الكويت", "ar", "Madīnat al-Kuwayt"),
+    ("المدينة المنورة", "ar", "Al-Madīnah al-Munawwarah"),
+    ("المملكة العربية السعودية", "ar", "Al-Mamlakah al-ʿArabīyah as-Saʿūdīyah"),
+    ("محافظة القاهرة", "ar", "Muhāfazat al-Qāhirah"),
+    ("شرم الشيخ", "ar", "Sharm ash-Shaykh"),
+    ("دير الزور", "ar", "Dayr az-Zawr"),
+    ("الدار البيضاء", "ar", "Ad-Dār al-Baydāʾ"),
+    ("اللاذقية", "ar", "Al-Lādhiqīyah"),
+    ("الجنوبية", "ar", "Al-Janūbīyah"),
+    ("أسوان", "ar", "Aswān"),
+    ("التّين", "ar", "At-Tīn"),  # shadda of the assimilated article
+    ("عَبْدُ اللّٰه", "ar", "ʿAbd Allāh"),
+    ("القاهرة", None, "Al-Qāhirah"),
     ("تهران", "fa", None),
     ("شیراز", "fa", "Shīrāz"),
     ("تبریز", "fa", "Tabrīz"),
@@ -252,9 +266,9 @@ CASES: list[tuple[str, str | None, str]] = [
     ("برلین (آلمان)", "fa", "Berlīn (Ālmān)"),
     ("شهرک ۲۲ بهمن", "fa", "Shahrak-e 22 Bahman"),
     ("حیدرآباد", "ur", "Hīdrābād"),
-    ("عمان", "ar", "ʿAmān"),
+    ("عمان", "ar", "ʿAmmān"),
     ("بَيْرُوت", "ar", "Bayrūt"),
-    ("مَكَّة", "ar", "Makka"),
+    ("مَكَّة", "ar", "Makkah"),
     ("חֵיפָה", "he", "Heifa"),
     ("בְּאֵר שֶׁבַע", "he", "Be'er Sheva"),
     ("אמסטערדאם", "yi", "Amsterdam"),
@@ -284,6 +298,24 @@ HINT_CASES: list[tuple[str, str | None, tuple[str, ...], str]] = [
     ("کارولینای شمالی", "fa", ("North Carolina",), "Kārolīnā-ye Shomālī"),
     ("لندن", "fa", ("London",), "Landan"),  # the hand lexicon wins
     ("آلمان", "fa", ("Germany",), "Ālmān"),  # unrelated hint: ignored
+    # Arabic: a BGN name settles the vowels and the construct state...
+    ("الداخلة", "ar", ("Al Wāḩāt ad Dākhilah", "Dakhla Oasis"), "Ad-Dākhilah"),
+    ("وحدة الضحاكي", "ar", ("Waḩdat aḑ Ḑaḩākī",), "Wahdat ad-Dahākī"),
+    ("جبل أم حَطين", "ar", ("Jabal Umm Ḩaţţīn",), "Jabal Umm Hattīn"),
+    # ...a foreign name its vowels, read as the Arabic letters allow
+    ("نوتنغهامشير", "ar", ("Nottinghamshire",), "Nūtinghhāmshīr"),
+    ("ستوكهولم", "ar", ("Stockholm",), "Stūkhūlm"),
+    ("ستراين", "ar", ("Strijen", "Gemeente Strijen"), "Strāyin"),
+    ("تشاسلاف", "ar", ("Čáslav",), "Tshāslāf"),  # تش as one sound
+    ("ميلاتسو", "ar", ("Milazzo",), "Mīlātsū"),
+    ("بيرتينورو", "ar", ("Bertinoro",), "Bīrtīnūrū"),
+    ("سانتا جوستا", "ar", ("Santa Giusta",), "Sāntā Jūstā"),
+    ("البسيط", "ar", ("Albacete",), "Al-Basīt"),  # the hint writes the article in
+    ("السويس", "ar", ("Suez",), "As-Suways"),  # unrelated hint: ignored
+    # A written و or ي is never a short vowel
+    ("أديس أبابا", "ar", ("Addis Ababa",), "Adīs Abābā"),
+    ("كوروني", "ar", ("Koroni",), "Kūrūnī"),
+    ("فرنسا", "ar", ("France",), "Faransā"),  # the hand lexicon wins
     ("東京", "ja", ("Tokyo",), "Tōkyō"),  # other languages ignore hints
 ]
 

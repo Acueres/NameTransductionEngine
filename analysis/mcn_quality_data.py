@@ -4,7 +4,10 @@ Collects, for every More Cultural Names place linked to Wikidata or GeoNames:
 
 - MCN's name in each language, with the language resolved to NTE's registry;
 - NTE's names for the same place in that language (GeoNames and Wikidata,
-  following the GeoNames <-> Wikidata links both ways), in NTE's lookup order;
+  following the GeoNames <-> Wikidata links both ways), in NTE's lookup order.
+  Wikidata names carry their `name_type`: `nte lookup` returns labels only,
+  the other types (alias, official, native, short, name, nickname) are kept
+  so the notebook can measure what they would add;
 - the place's reference names (GeoNames primary name, English names), which
   NTE's lookup passes to the display romanizer as reading hints;
 - how MCN's name resolves through NTE's lookup key (`normalize_name`) over the
@@ -15,7 +18,9 @@ Reading names.sqlite takes a few minutes, so the result is cached:
 
     python analysis/mcn_quality_data.py      # from the project root
 
-writes data/mcn_eval/mcn_quality.json.gz, which the notebook loads.
+writes data/mcn_eval/mcn_quality.json.gz, which the notebook loads. The cache
+records the Wikidata dataset it was built from and is rebuilt when names.sqlite
+holds another one.
 """
 
 import gzip
@@ -45,7 +50,9 @@ from name_transduction_engine.normalization.name_normalization import (  # noqa:
 MCN_DIR = PROJECT_ROOT / "data" / "repos" / "more-cultural-names"
 DB_PATH = PROJECT_ROOT / "data" / "names.sqlite"
 CACHE_PATH = PROJECT_ROOT / "data" / "mcn_eval" / "mcn_quality.json.gz"
-FORMAT = 2
+# 3: Wikidata schema of the compact dataset (wikidata_entity, wikidata_name,
+# wikidata_geonames), name types, entity groups, dataset id
+FORMAT = 3
 
 # MCN language ids for historical stages: their names follow older spellings,
 # which NTE's (modern) data does not aim at
@@ -122,14 +129,14 @@ def _linked_entities(conn, qid: str | None, gid: int | None):
         gids |= {
             r[0]
             for r in conn.execute(
-                "SELECT geonames_id FROM wikidata_location_geonames WHERE qid = ?", (qid,)
+                "SELECT geonames_id FROM wikidata_geonames WHERE qid = ?", (qid,)
             )
         }
     if gid:
         qids |= {
             r[0]
             for r in conn.execute(
-                "SELECT qid FROM wikidata_location_geonames WHERE geonames_id = ?", (gid,)
+                "SELECT qid FROM wikidata_geonames WHERE geonames_id = ?", (gid,)
             )
         }
     # Keep only entities NTE actually has
@@ -138,17 +145,20 @@ def _linked_entities(conn, qid: str | None, gid: int | None):
         for g in gids
         if conn.execute("SELECT 1 FROM geoname WHERE geonameid = ?", (g,)).fetchone()
     }
-    qids = {
-        q
-        for q in qids
-        if conn.execute("SELECT 1 FROM wikidata_location WHERE qid = ?", (q,)).fetchone()
-    }
-    return sorted(gids), sorted(qids)
+    groups = {}
+    for q in qids:
+        row = conn.execute(
+            "SELECT entity_group FROM wikidata_entity WHERE qid = ?", (q,)
+        ).fetchone()
+        if row:
+            groups[q] = row[0]
+    return sorted(gids), sorted(groups), groups
 
 
 def _names(conn, gids, qids, codes) -> list[dict]:
     """NTE's names in the given languages, in lookup order: GeoNames first,
-    entity id ascending, then record order"""
+    entity id ascending, then record order. Wikidata labels come before the
+    other name types, which `nte lookup` does not return"""
     if not codes:
         return []
     marks = ",".join("?" for _ in codes)
@@ -160,26 +170,34 @@ def _names(conn, gids, qids, codes) -> list[dict]:
             f"ORDER BY alternate_name_id",
             (g, *codes),
         ):
-            out.append(_name("geonames", str(g), name, lang, script, region, variant))
+            out.append(_name("geonames", str(g), name, lang, script, region, variant, None))
     for q in qids:
-        for name, lang, script, region, variant in conn.execute(
-            f"SELECT name, lang, lang_script, lang_region, lang_variant "
-            f"FROM wikidata_location_name WHERE qid = ? AND lang IN ({marks}) "
-            f"ORDER BY term_type <> 'label', rowid",
+        for name, lang, script, region, variant, name_type in conn.execute(
+            f"SELECT name, lang, lang_script, lang_region, lang_variant, name_type "
+            f"FROM wikidata_name WHERE qid = ? AND lang IN ({marks}) "
+            f"ORDER BY name_type <> 'label', rowid",
             (q, *codes),
         ):
-            out.append(_name("wikidata", q, name, lang, script, region, variant))
+            out.append(_name("wikidata", q, name, lang, script, region, variant, name_type))
     return out
 
 
-def _name(source, entity, name, lang, script, region, variant) -> dict:
+def _name(source, entity, name, lang, script, region, variant, name_type) -> dict:
     tag = "-".join(p for p in (lang, script, region, variant) if p)
-    return {"source": source, "entity": entity, "name": name, "lang": lang, "tag": tag}
+    return {
+        "source": source,
+        "entity": entity,
+        "name": name,
+        "lang": lang,
+        "tag": tag,
+        # Wikidata: label, alias, official, ...; None for GeoNames
+        "name_type": name_type,
+    }
 
 
 def _reference_names(conn, gids, qids) -> list[str]:
-    """What NTE's lookup passes as hints: GeoNames primary name and English
-    names, Wikidata English label and aliases"""
+    """What NTE's lookup passes as hints: GeoNames primary name and up to five
+    English names, Wikidata English labels"""
     out: list[str] = []
     for g in gids:
         row = conn.execute("SELECT name FROM geoname WHERE geonameid = ?", (g,)).fetchone()
@@ -197,8 +215,8 @@ def _reference_names(conn, gids, qids) -> list[str]:
         out += [
             r[0]
             for r in conn.execute(
-                "SELECT name FROM wikidata_location_name WHERE qid = ? AND lang = 'en' "
-                "ORDER BY term_type <> 'label', name LIMIT 5",
+                "SELECT name FROM wikidata_name WHERE qid = ? AND lang = 'en' "
+                "AND name_type = 'label' ORDER BY name LIMIT 5",
                 (q,),
             )
         ]
@@ -207,7 +225,7 @@ def _reference_names(conn, gids, qids) -> list[str]:
 
 def _resolve(conn, name: str) -> tuple[set[int], set[str]]:
     """Entities whose names normalize to the same key as `name` (NTE's
-    resolve step), over the whole database"""
+    resolve step, every Wikidata name type), over the whole database"""
     key = normalize_name(name)
     if not key:
         return set(), set()
@@ -222,7 +240,7 @@ def _resolve(conn, name: str) -> tuple[set[int], set[str]]:
     qids = {
         r[0]
         for r in conn.execute(
-            "SELECT DISTINCT qid FROM wikidata_location_name WHERE normalized_name = ?",
+            "SELECT DISTINCT qid FROM wikidata_name WHERE normalized_name = ?",
             (key,),
         )
     }
@@ -236,11 +254,12 @@ def build() -> dict:
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     try:
         registry = read_registry(conn)
+        dataset_id = _wikidata_dataset_id(conn)
         codes = resolve_codes(languages, registry)
         places = []
         resolved_cache: dict[str, tuple[set[int], set[str]]] = {}
         for k, loc in enumerate(locations):
-            gids, qids = _linked_entities(conn, loc["qid"], loc["gid"])
+            gids, qids, groups = _linked_entities(conn, loc["qid"], loc["gid"])
             wanted = sorted({codes[m] for m in loc["names"] if codes.get(m)})
             rows = []
             for mcn_lang, mcn_name in loc["names"].items():
@@ -265,6 +284,8 @@ def build() -> dict:
                     "gid": loc["gid"],
                     "nte_gids": gids,
                     "nte_qids": qids,
+                    # Wikidata entity group per QID: place / historical_place
+                    "nte_wd_groups": groups,
                     "reference_names": _reference_names(conn, gids, qids),
                     "nte_names": _names(conn, gids, qids, wanted),
                     "rows": rows,
@@ -277,6 +298,7 @@ def build() -> dict:
     return {
         "format": FORMAT,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "wikidata_dataset_id": dataset_id,
         "languages": {
             m: {"code": codes.get(m), "historic": info["historic"]}
             for m, info in languages.items()
@@ -285,12 +307,36 @@ def build() -> dict:
     }
 
 
+def _wikidata_dataset_id(conn) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM build_metadata WHERE key = 'wikidata_dataset_id'"
+    ).fetchone()
+    return row[0] if row else None
+
+
+def database_dataset_id() -> str | None:
+    """The Wikidata dataset loaded in names.sqlite"""
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        return _wikidata_dataset_id(conn)
+    finally:
+        conn.close()
+
+
 def load(rebuild: bool = False) -> dict:
-    """The cached benchmark data, built first if missing or `rebuild`"""
+    """The cached benchmark data, built first if missing, from an older
+    format or another Wikidata dataset, or if `rebuild`"""
     if not rebuild and CACHE_PATH.exists():
         with gzip.open(CACHE_PATH, "rt", encoding="utf-8") as f:
             data = json.load(f)
-        if data.get("format") == FORMAT:
+        if data.get("format") != FORMAT:
+            print(f"cached benchmark data has format {data.get('format')}, need {FORMAT}: rebuilding")
+        elif data.get("wikidata_dataset_id") != database_dataset_id():
+            print(
+                f"cached benchmark data is for Wikidata {data.get('wikidata_dataset_id')}, "
+                f"names.sqlite has {database_dataset_id()}: rebuilding"
+            )
+        else:
             return data
     data = build()
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)

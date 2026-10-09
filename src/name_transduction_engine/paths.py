@@ -26,3 +26,4 @@ WIKIDATA_COMPACT_DIR = WIKIDATA_BUILD_DIR / "compact"  # finished dataset
 
 # Models learned from the datasets (built by `nte init`, after the datasets)
 PERSIAN_MODEL_PATH = MODELS_DIR / "persian.json.gz"
+ARABIC_MODEL_PATH = MODELS_DIR / "arabic.json.gz"
