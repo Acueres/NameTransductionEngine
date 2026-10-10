@@ -1,10 +1,6 @@
 import sqlite3
 
-from name_transduction_engine.paths import (
-    DB_PATH,
-    WIKIDATA_COMPACT_DIR,
-    WIKIDATA_LOCATIONS_PATH,
-)
+from name_transduction_engine.paths import DB_PATH, WIKIDATA_DOWNLOAD_DIR
 from name_transduction_engine.datasets.shared import (
     configure_connection,
     ensure_build_metadata_table,
@@ -18,14 +14,14 @@ from name_transduction_engine.normalization.language_code_normalization import (
 )
 from .build import BuildOptions, build_wikidata_compact
 from .classes import refresh_class_map as refresh_wikidata_classes
-from .compact import CompactDataset, open_compact_dataset
+from .compact import CompactDataset, has_loaded_groups, open_compact_dataset
 from .load import (
     is_wikidata_ready,
     load_compact_dataset,
     write_build_metadata,
 )
 from .schema import create_schema, build_indexes
-from .download import download_wikidata_locations_data
+from .download import fetch_published_dataset
 from .download_raw import download_wikidata_raw
 
 __all__ = [
@@ -34,25 +30,30 @@ __all__ = [
     "current_wikidata_dataset",
     "download_wikidata_raw",
     "ensure_wikidata_sqlite",
+    "fetch_published_dataset",
     "refresh_wikidata_classes",
 ]
 
 
 def current_wikidata_dataset() -> CompactDataset | None:
-    """What `nte init` would load: the locally built compact dataset, else
-    the legacy locations file if it was downloaded"""
-    return open_compact_dataset(WIKIDATA_COMPACT_DIR, WIKIDATA_LOCATIONS_PATH)
+    """What `nte init` loads: the published dataset downloaded by
+    `nte data fetch wikidata`, if it holds every loaded group. The output of
+    `nte data build wikidata-compact` is never loaded; it is the source of
+    new releases"""
+    dataset = open_compact_dataset(WIKIDATA_DOWNLOAD_DIR)
+    return dataset if dataset is not None and has_loaded_groups(dataset) else None
 
 
 def ensure_wikidata_sqlite(force: bool = False) -> None:
-    """(Re)build the Wikidata tables in names.sqlite from the compact dataset:
-    the one built locally (`nte data build wikidata-compact`) if present,
-    otherwise the published legacy locations file"""
+    """(Re)build the Wikidata tables in names.sqlite from the compact dataset
+    (see current_wikidata_dataset). Without a downloaded copy, the newest
+    published dataset is downloaded first; a newer release is only picked
+    up by `nte data fetch wikidata`"""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     dataset = current_wikidata_dataset()
     if dataset is None:
-        download_wikidata_locations_data(force)
+        fetch_published_dataset()
         dataset = current_wikidata_dataset()
         if dataset is None:
             raise RuntimeError("Wikidata compact dataset is missing after download.")

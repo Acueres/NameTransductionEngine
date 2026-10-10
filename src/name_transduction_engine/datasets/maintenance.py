@@ -10,7 +10,7 @@ from name_transduction_engine.paths import (
     RAW_DIR_WIKIDATA,
     BUILD_DIR,
     WIKIDATA_COMPACT_DIR,
-    WIKIDATA_LOCATIONS_PATH,
+    WIKIDATA_DOWNLOAD_DIR,
     WIKIDATA_RAW_DUMP_GLOB,
     WIKIDATA_WORK_DIR,
 )
@@ -35,11 +35,8 @@ from .wikidata.load import (
 from .wikidata.schema import LANGUAGE_TAG_TABLE as WIKIDATA_LANGUAGE_TAG_TABLE
 from .wikidata.build import committed_shards, read_state as read_wikidata_state
 from .wikidata.classes import ClassFileError, load_class_map
-from .wikidata.compact import (
-    format_manifest_summary,
-    open_compact_dataset,
-    read_manifest,
-)
+from .wikidata.compact import format_manifest_summary, read_manifest
+from .wikidata.data_provision import current_wikidata_dataset
 from name_transduction_engine.models.model_provider import (
     ModelStatus,
     collect_model_status,
@@ -107,14 +104,19 @@ class SourceStatus:
 
 @dataclass(frozen=True)
 class WikidataBuildStatus:
-    """The streaming build (`nte data build wikidata-compact`): the run in
-    progress or last finished, and the compact dataset it produced"""
+    """The Wikidata compact datasets: the published copy downloaded by
+    `nte data fetch wikidata` (the one `nte init` loads), and the build that
+    produces new releases (`nte data build wikidata-compact`, its run and
+    output), which is never loaded"""
 
     state: dict | None  # work/state.json
     shard_bytes: int
-    manifest: dict | None  # compact/manifest.json
+    manifest: dict | None  # build/wikidata/compact/manifest.json
     compact_bytes: int
     classes: str  # state of the class file the build needs
+    published: dict | None = None  # raw/wikidata/compact/manifest.json
+    published_bytes: int = 0
+    loadable: bool = False  # the downloaded copy holds every loaded group
 
 
 @dataclass(frozen=True)
@@ -195,8 +197,9 @@ def _registry_mismatch(metadata: dict[str, str], built_with_key: str) -> str | N
 
 
 def _wikidata_expected_dataset() -> str | None:
+    """dataset_id of the downloaded dataset `nte init` would load"""
     try:
-        dataset = open_compact_dataset(WIKIDATA_COMPACT_DIR, WIKIDATA_LOCATIONS_PATH)
+        dataset = current_wikidata_dataset()
     except (OSError, ValueError):
         return None
     return dataset.dataset_id if dataset else None
@@ -229,8 +232,24 @@ def _collect_wikidata_build() -> WikidataBuildStatus:
         if manifest
         else 0
     )
+    try:
+        published = read_manifest(WIKIDATA_DOWNLOAD_DIR)
+    except (OSError, ValueError):
+        published = None
+    published_bytes = (
+        sum(p.stat().st_size for p in WIKIDATA_DOWNLOAD_DIR.iterdir() if p.is_file())
+        if published
+        else 0
+    )
     return WikidataBuildStatus(
-        state, shard_bytes, manifest, compact_bytes, _class_file_state()
+        state,
+        shard_bytes,
+        manifest,
+        compact_bytes,
+        _class_file_state(),
+        published,
+        published_bytes,
+        _wikidata_expected_dataset() is not None,
     )
 
 
@@ -326,9 +345,6 @@ def collect_data_status() -> DataStatus:
             _artifact(path.name, path)
             for path in sorted(RAW_DIR_WIKIDATA.glob(WIKIDATA_RAW_DUMP_GLOB))
         ]
-    raw_artifacts.append(
-        _artifact("wikidata_locations.jsonl.gz (legacy)", WIKIDATA_LOCATIONS_PATH)
-    )
 
     partial_files = [
         _artifact(path.name, path)
@@ -398,7 +414,32 @@ def format_data_status(status: DataStatus) -> str:
 
 
 def _format_wikidata_build(build: WikidataBuildStatus) -> list[str]:
-    lines = ["Wikidata build:", f"  class file: {build.classes}"]
+    lines = ["Wikidata datasets:"]
+    published = build.published
+    if published is None:
+        lines.append(
+            "  downloaded (loaded by `nte init`): none yet; `nte init` or "
+            "`nte data fetch wikidata` downloads the newest release"
+        )
+    else:
+        note = "" if build.loadable else "; incomplete, run `nte data fetch wikidata`"
+        lines.append(
+            f"  downloaded (loaded by `nte init`): {published['dataset_id']} "
+            f"({_human_bytes(build.published_bytes)}{note})"
+        )
+        lines.extend(
+            f"    {line}"
+            for line in format_manifest_summary(published, WIKIDATA_DOWNLOAD_DIR)
+        )
+    # The build is for machines that build datasets; skip it where none was
+    if (
+        build.state is not None
+        or build.manifest is not None
+        or (not build.classes.startswith("not usable"))
+    ):
+        lines.append(
+            f"  build for publishing (not loaded), class file: {build.classes}"
+        )
     state = build.state
     if state is not None:
         dump = state["dump"]
@@ -431,12 +472,15 @@ def _format_wikidata_build(build: WikidataBuildStatus) -> list[str]:
             else ""
         )
         lines.append(
-            f"  compact dataset: {manifest['dataset_id']} "
+            f"  build output (to publish): {manifest['dataset_id']} "
             f"({_human_bytes(build.compact_bytes)}{partial})"
         )
-        lines.extend(f"    {line}" for line in format_manifest_summary(manifest))
-    else:
-        lines.append("  compact dataset: none yet")
+        lines.extend(
+            f"    {line}"
+            for line in format_manifest_summary(manifest, mark_loaded=False)
+        )
+    elif state is not None:
+        lines.append("  build output (to publish): none yet")
     return lines
 
 

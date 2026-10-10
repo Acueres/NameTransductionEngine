@@ -7,6 +7,7 @@ from name_transduction_engine.datasets.dataset_provider import (
     build_wikidata_compact,
     download_wikidata_raw,
     ensure_datasets,
+    fetch_wikidata_dataset,
     refresh_wikidata_classes,
 )
 from name_transduction_engine.datasets.wikidata.classes import (
@@ -15,6 +16,7 @@ from name_transduction_engine.datasets.wikidata.classes import (
 )
 from name_transduction_engine.datasets.wikidata.dump_source import DEFAULT_MIRROR
 from name_transduction_engine.datasets.wikidata.build import BuildError
+from name_transduction_engine.datasets.wikidata.download import FetchError
 from name_transduction_engine.language_packs.language_pack_provider import (
     ensure_builtin_packs,
 )
@@ -66,7 +68,16 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_data_fetch(args: argparse.Namespace) -> int:
-    if args.source == "wikidata-raw":
+    if args.source == "wikidata":
+        try:
+            fetch_wikidata_dataset(
+                args.tag, all_groups=args.all_groups, force=args.force
+            )
+        except FetchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print("Run `nte init` to load it into names.sqlite.")
+    elif args.source == "wikidata-raw":
         download_wikidata_raw(args.force, mirror=args.mirror, url=args.url)
     return 0
 
@@ -412,16 +423,38 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="<subcommand>",
     )
 
-    p_fetch = data_sub.add_parser("fetch", help="download a raw dataset")
+    p_fetch = data_sub.add_parser(
+        "fetch",
+        help="download a published dataset or a raw dump",
+        description=(
+            "wikidata: the newest published compact Wikidata dataset (GitHub "
+            "release wikidata-YYYYMMDD); `nte init` then loads it. "
+            "wikidata-raw: a dated Wikidata JSON dump (~100 GB), only needed "
+            "to build from a local file."
+        ),
+    )
     # Ensure the parser rejects anything that isn't a known source
-    p_fetch.add_argument("source", choices=["wikidata-raw"])
-    p_fetch.add_argument("--force", action="store_true")
+    p_fetch.add_argument("source", choices=["wikidata", "wikidata-raw"])
     p_fetch.add_argument(
+        "--force", action="store_true", help="download again even if present"
+    )
+    wf = p_fetch.add_argument_group("wikidata")
+    wf.add_argument(
+        "--tag", help="a specific release, e.g. wikidata-20260928 (default: newest)"
+    )
+    wf.add_argument(
+        "--all-groups",
+        action="store_true",
+        help="also download the groups not loaded into names.sqlite yet "
+        "(people, dynasties, name items, ...)",
+    )
+    wr = p_fetch.add_argument_group("wikidata-raw")
+    wr.add_argument(
         "--mirror",
         default=DEFAULT_MIRROR,
         help=f"dump mirror to take the newest dated dump from (default {DEFAULT_MIRROR})",
     )
-    p_fetch.add_argument("--url", help="download this dated dump URL instead")
+    wr.add_argument("--url", help="download this dated dump URL instead")
     p_fetch.set_defaults(func=cmd_data_fetch)
 
     p_build = data_sub.add_parser(
@@ -430,8 +463,10 @@ def build_parser() -> argparse.ArgumentParser:
         "its class file, or the models learned from the datasets",
         description=(
             "wikidata-compact: stream the newest dated Wikidata dump and extract "
-            "places, historical places and name data. Resumable: interrupt it "
-            "any time (Ctrl-C) and run the same command again. "
+            "places, historical places and name data into data/build/wikidata/"
+            "compact, the copy to publish as a release (`nte init` never loads "
+            "it). Resumable: interrupt it any time (Ctrl-C) and run the same "
+            "command again. "
             "wikidata-classes: regenerate the class file the build classifies "
             "entities with (SPARQL, a few minutes). "
             "models: the models learned from the datasets."

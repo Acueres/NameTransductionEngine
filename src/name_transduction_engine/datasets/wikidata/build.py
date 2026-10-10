@@ -346,9 +346,15 @@ def _finalize(
         f"in {time.monotonic() - started:.0f}s"
         + (f" (covers {progress:.1%} of the dump)" if partial else "")
     )
-    for line in format_manifest_summary(manifest):
+    for line in format_manifest_summary(manifest, mark_loaded=False):
         print(f"  {line}")
-    print("Load it into names.sqlite with `nte init`.")
+    snapshot = manifest["snapshot"]
+    tag = snapshot if snapshot.isdigit() and len(snapshot) == 8 else "YYYYMMDD"
+    print(
+        f"Publish it as a GitHub release tagged wikidata-{tag} "
+        "(manifest.json and every .jsonl.gz file); `nte init` only loads "
+        "datasets fetched from releases."
+    )
 
 
 # The streaming run

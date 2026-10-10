@@ -5,6 +5,7 @@ from .wikidata.data_provision import (
     build_wikidata_compact,
     download_wikidata_raw,
     ensure_wikidata_sqlite,
+    fetch_published_dataset as fetch_wikidata_dataset,
     refresh_wikidata_classes,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "build_wikidata_compact",
     "download_wikidata_raw",
     "ensure_wikidata_sqlite",
+    "fetch_wikidata_dataset",
     "refresh_wikidata_classes",
 ]
 

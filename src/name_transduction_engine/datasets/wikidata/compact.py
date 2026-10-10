@@ -1,5 +1,5 @@
-"""The compact Wikidata dataset on disk: writing it from build shards,
-reading it back, and the legacy single-file format.
+"""The compact Wikidata dataset on disk: writing it from build shards and
+reading it back.
 
 Layout of a compact dataset directory:
 
@@ -8,6 +8,14 @@ Layout of a compact dataset directory:
 
 Each part stays under GitHub's 2 GiB release-asset limit. Records are
 described in extract.py; the manifest lists files, counts and provenance.
+
+Two copies live on disk and never mix:
+  data/build/wikidata/compact   written by `nte data build wikidata-compact`;
+                                what gets published as a GitHub release
+  data/raw/wikidata/compact     downloaded from a release by
+                                `nte data fetch wikidata`; the only copy
+                                `nte init` loads into names.sqlite
+A downloaded copy may hold only some groups; the manifest still lists them all.
 """
 
 import gzip
@@ -35,33 +43,39 @@ GZIP_LEVEL: Final[int] = 6
 
 @dataclass(frozen=True)
 class CompactDataset:
-    """A compact dataset ready to load: either a manifest directory or the
-    legacy locations file"""
+    """A compact dataset directory ready to load"""
 
     dataset_id: str
     path: Path
-    manifest: dict[str, Any] | None  # None for the legacy file
+    manifest: dict[str, Any]
 
     @property
-    def is_legacy(self) -> bool:
-        return self.manifest is None
+    def snapshot(self) -> str:
+        return self.manifest["snapshot"]
 
     @property
     def partial(self) -> bool:
-        return bool(self.manifest and self.manifest.get("partial"))
+        return bool(self.manifest.get("partial"))
 
     def files(self, group: str) -> list[Path]:
-        if self.manifest is None:
-            return [self.path] if group == C.PLACE else []
         entry = self.manifest["groups"].get(group) or {}
         return [self.path / f["name"] for f in entry.get("files", [])]
 
+    def has_group(self, group: str) -> bool:
+        """Every file of the group is present (a group with no records has
+        no files)"""
+        return all(path.is_file() for path in self.files(group))
+
     def iter_records(self, groups: Iterable[str]) -> Iterator[dict[str, Any]]:
-        if self.manifest is None:
-            yield from _iter_legacy(self.path)
-            return
         for group in groups:
-            for path in self.files(group):
+            files = self.files(group)
+            missing = [path.name for path in files if not path.is_file()]
+            if missing:
+                raise FileNotFoundError(
+                    f"Wikidata dataset {self.dataset_id} is missing {group} "
+                    f"file(s) {', '.join(missing)}; run `nte data fetch wikidata`"
+                )
+            for path in files:
                 yield from iter_jsonl_gz(path)
 
 
@@ -69,26 +83,31 @@ def read_manifest(directory: Path) -> dict[str, Any] | None:
     path = directory / MANIFEST_NAME
     if not path.is_file():
         return None
-    manifest = json.loads(path.read_text(encoding="utf-8"))
+    return parse_manifest(path.read_bytes(), str(path))
+
+
+def parse_manifest(data: bytes, where: str) -> dict[str, Any]:
+    manifest = json.loads(data)
     if manifest.get("format") != FORMAT:
-        raise ValueError(f"{path}: not an NTE Wikidata compact dataset")
+        raise ValueError(f"{where}: not an NTE Wikidata compact dataset")
     if manifest.get("format_version") != FORMAT_VERSION:
         raise ValueError(
-            f"{path}: format version {manifest.get('format_version')} is not "
-            f"supported (expected {FORMAT_VERSION})"
+            f"{where}: format version {manifest.get('format_version')} is not "
+            f"supported (expected {FORMAT_VERSION}); update NTE"
         )
     return manifest
 
 
-def open_compact_dataset(directory: Path, legacy_file: Path) -> CompactDataset | None:
-    """The locally built dataset if there is one, else the legacy file"""
+def open_compact_dataset(directory: Path) -> CompactDataset | None:
     manifest = read_manifest(directory)
-    if manifest is not None:
-        return CompactDataset(manifest["dataset_id"], directory, manifest)
-    if legacy_file.is_file():
-        stat = legacy_file.stat()
-        return CompactDataset(f"legacy-{stat.st_size}", legacy_file, None)
-    return None
+    if manifest is None:
+        return None
+    return CompactDataset(manifest["dataset_id"], directory, manifest)
+
+
+def has_loaded_groups(dataset: CompactDataset) -> bool:
+    """Every group `nte init` loads is present"""
+    return all(dataset.has_group(group) for group in C.LOADED_GROUPS)
 
 
 def iter_jsonl_gz(path: Path) -> Iterator[dict[str, Any]]:
@@ -98,32 +117,12 @@ def iter_jsonl_gz(path: Path) -> Iterator[dict[str, Any]]:
                 yield orjson.loads(line)
 
 
-# Legacy format: {"qid", "kind", "p31_qids", "geonames_ids", "lat", "lon",
-# "names": [{"wd_lang", "name", "term_type", ...}]}
-
-
-def _iter_legacy(path: Path) -> Iterator[dict[str, Any]]:
-    for old in iter_jsonl_gz(path):
-        kind = old["kind"]
-        names: dict[tuple[str, str], list[str]] = {}
-        for name in old.get("names", ()):
-            key = (name["name"], name.get("term_type", "label"))
-            names.setdefault(key, []).append(name["wd_lang"])
-        record: dict[str, Any] = {
-            "qid": old["qid"],
-            "group": C.HISTORICAL_PLACE if kind == "historical_country" else C.PLACE,
-            "kind": kind,
-            "classes": old.get("p31_qids", []),
-            "names": [
-                {"text": text, "type": kind_, "langs": langs}
-                for (text, kind_), langs in names.items()
-            ],
-        }
-        if old.get("lat") is not None and old.get("lon") is not None:
-            record["coord"] = [old["lat"], old["lon"]]
-        if old.get("geonames_ids"):
-            record["ids"] = {"geonames": old["geonames_ids"]}
-        yield record
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while block := f.read(1024 * 1024):
+            h.update(block)
+    return h.hexdigest()
 
 
 # Writing (finalize)
@@ -175,16 +174,8 @@ class _GroupWriter:
         for part in self.parts:
             path = self.directory / part["name"]
             part["bytes"] = path.stat().st_size
-            part["sha256"] = _sha256(path)
+            part["sha256"] = sha256_file(path)
         return self.parts
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while block := f.read(1024 * 1024):
-            h.update(block)
-    return h.hexdigest()
 
 
 def write_compact(
@@ -277,12 +268,23 @@ def write_compact(
     return manifest
 
 
-def format_manifest_summary(manifest: dict[str, Any]) -> list[str]:
+def format_manifest_summary(
+    manifest: dict[str, Any], directory: Path | None = None, mark_loaded: bool = True
+) -> list[str]:
+    """Two lines per group. With `directory`, groups whose files are not all
+    there (a partial download) are marked"""
     lines = []
     for group, entry in manifest.get("groups", {}).items():
         size = sum(f["bytes"] for f in entry["files"])
-        loaded = " (loaded)" if group in C.LOADED_GROUPS else ""
-        lines.append(f"{group}: {entry['records']:,} records, {_mib(size)}{loaded}")
+        notes = []
+        if mark_loaded and group in C.LOADED_GROUPS:
+            notes.append("loaded")
+        if directory is not None and not all(
+            (directory / f["name"]).is_file() for f in entry["files"]
+        ):
+            notes.append("not downloaded")
+        note = f" ({', '.join(notes)})" if notes else ""
+        lines.append(f"{group}: {entry['records']:,} records, {_mib(size)}{note}")
         top = list(entry["kinds"].items())[:8]
         lines.append("    " + ", ".join(f"{k} {n:,}" for k, n in top))
     return lines

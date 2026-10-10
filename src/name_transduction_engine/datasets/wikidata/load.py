@@ -85,8 +85,7 @@ def load_compact_dataset(
     seen: set[str] = set()
     entities = 0
 
-    source = "legacy locations file" if dataset.is_legacy else dataset.dataset_id
-    print(f"Loading Wikidata ({source})...")
+    print(f"Loading Wikidata ({dataset.dataset_id})...")
     if dataset.partial:
         print(
             "  note: this compact dataset is partial "

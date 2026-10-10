@@ -14,8 +14,8 @@ BUILTIN_PACKS_DIR = PROJECT_ROOT / "packs"
 # wikidata-YYYYMMDD-all.json.bz2. The build streams the dump from the network
 # unless given a file with --source
 WIKIDATA_RAW_DUMP_GLOB = "wikidata-*-all.json.bz2"
-# Legacy compact file (locations only), published before the streaming build
-WIKIDATA_LOCATIONS_PATH = RAW_DIR_WIKIDATA / "wikidata_locations.jsonl.gz"
+# Published compact dataset downloaded from GitHub (`nte data fetch wikidata`)
+WIKIDATA_DOWNLOAD_DIR = RAW_DIR_WIKIDATA / "compact"
 # Wikidata classes the build keeps (`nte data build wikidata-classes`)
 WIKIDATA_CLASSES_PATH = RAW_DIR_WIKIDATA / "wikidata_classes.tsv"
 
