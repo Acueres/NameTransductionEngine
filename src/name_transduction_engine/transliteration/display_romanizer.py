@@ -105,7 +105,8 @@ class DisplayRomanizer:
         ("ja", "uk", "zh-Hant-TW", "ko-KP"); without it, the language is
         assumed from the script and results carry a warning. `hints` are
         other names of the same entity; Latin-script ones may guide the
-        reading of scripts that leave vowels unwritten (Persian)"""
+        reading of scripts that leave vowels unwritten (Persian, Arabic)
+        or can be read in several ways (Japanese kanji)"""
         text = unicodedata.normalize("NFC", text)
         source, warnings = dominant_script(text)
         source_script = source or "Zzzz"
@@ -203,6 +204,22 @@ def _base_script(group: str) -> str:
     return {"Jpan": "Hani", "Kore": "Hang"}.get(group, group)
 
 
+def _join_latin_to_japanese(runs: list[list[str]]) -> list[list[str]]:
+    """Latin letters written against Japanese with no space are part of the
+    Japanese name (Dingwall市 Dingwall-shi, JR東日本): the Japanese provider
+    places them, and the hyphen before a generic term"""
+    out: list[list[str]] = []
+    for group, chunk in runs:
+        if out:
+            prev_group, prev_chunk = out[-1]
+            glued = prev_chunk[-1:].isalpha() and chunk[:1].isalpha()
+            if glued and {prev_group, group} == {LATIN, "Jpan"}:
+                out[-1] = ["Jpan", prev_chunk + chunk]
+                continue
+        out.append([group, chunk])
+    return out
+
+
 def _runs(text: str, ctx: Context) -> list[_Run]:
     """Split into runs of one script group. Digits, punctuation, spaces and
     combining marks join the run they follow (or the first run)."""
@@ -240,6 +257,7 @@ def _runs(text: str, ctx: Context) -> list[_Run]:
     if not runs:
         return [_Run(LATIN, text)]
     runs[0][1] = leading + runs[0][1]
+    runs = _join_latin_to_japanese(runs)
 
     # Trailing spaces and punctuation of a non-Latin run belong between runs,
     # not inside the provider's input

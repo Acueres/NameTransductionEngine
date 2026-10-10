@@ -63,7 +63,7 @@ CASES: list[tuple[str, str | None, str]] = [
     ("南アフリカ共和国", "ja", "Minami Afurika Kyōwakoku"),
     ("アメリカ合衆国", "ja", "Amerika Gasshūkoku"),
     ("伏見稲荷大社", "ja", "Fushimi Inari Taisha"),
-    ("日光東照宮", "ja", "Nikkō Tōshōgū"),
+    ("日光東照宮", "ja", "Nikkō Tōshō-gū"),
     ("東京都千代田区", "ja", "Tōkyō-to Chiyoda-ku"),
     ("東京ビッグサイト", "ja", "Tōkyō Biggusaito"),
     ("東大阪市", "ja", "Higashiōsaka-shi"),
@@ -78,6 +78,46 @@ CASES: list[tuple[str, str | None, str]] = [
     # Spoken Arabic varieties use the Arabic rules
     ("ياليسوس", "arz", "Yālīsūs"),
     ("東京-大阪", "ja", "Tōkyō-Ōsaka"),
+    # Japanese kana, read over the whole word: sokuon and small kana across
+    # the analyzer's token boundaries
+    ("ブラックリー", "ja", "Burakkurī"),
+    ("サトゥ・マーレ", "ja", "Satu Māre"),
+    ("ウィッチェ", "ja", "Witche"),
+    # extended katakana composed by rule; a small vowel spelling a syllable
+    # the syllabary already has is a vowel of its own
+    ("リトムニェジツェ", "ja", "Ritomunyejitse"),
+    ("スィノプ", "ja", "Sinopu"),
+    ("ブィドゴシュチュ", "ja", "Buidogoshuchu"),
+    ("クラスノダル", "ja", "Kurasunodaru"),  # not "Kurasu no Daru"
+    ("アピンへダム", "ja", "Apinhedamu"),  # hiragana へ typed for katakana ヘ
+    # long vowels: UniDic's pronunciation, katakana as written but for ou
+    ("大野", "ja", "Ōno"),
+    ("井上", "ja", "Inoue"),
+    ("ヴァードウス", "ja", "Vādōsu"),
+    ("クズルウルマク", "ja", "Kuzuruurumaku"),
+    ("しおやまち", "ja", "Shioyamachi"),
+    # generic terms after a name: hyphenated, read as in a compound
+    ("エルベ川", "ja", "Erube-gawa"),
+    ("利根川", "ja", "Tone-gawa"),
+    ("キトノス島", "ja", "Kitonosu-tō"),
+    ("本州島", "ja", "Honshū-tō"),
+    ("琵琶湖", "ja", "Biwa-ko"),
+    ("東京駅", "ja", "Tōkyō-eki"),
+    ("大阪城", "ja", "Ōsaka-jō"),
+    ("チワワ州", "ja", "Chiwawa-shū"),
+    ("キョンサン道", "ja", "Kyonsan-dō"),
+    ("ハプスブルク家", "ja", "Hapusuburuku-ke"),
+    ("ナイル川デルタ", "ja", "Nairu-gawa Deruta"),
+    ("クラショヴァ人", "ja", "Kurashovajin"),  # written solid, read -jin
+    ("Dingwall市", "ja", "Dingwall-shi"),
+    # particles between words, prefixes before katakana
+    ("アテナイのアクロポリス", "ja", "Atenai no Akuroporisu"),
+    ("古代エジプトの都市", "ja", "Kodai Ejiputo no Toshi"),
+    ("高アトラス", "ja", "Kō Atorasu"),
+    # a Chinese generic term marks a Chinese name: Sino-Japanese readings
+    ("吉隆鎮", "ja", "Kichiryū-chin"),
+    ("外務省", "ja", "Gaimushō"),  # a word the dictionary knows
+    ("壌塘県", "ja", "壌塘県"),  # no reading, no sign of a Chinese name
     ("信濃", "ja", "Shinano"),
     ("群馬", "ja", "Gunma"),
     ("東京", None, "Dongjing"),  # no tag, no kana: Chinese
@@ -234,7 +274,7 @@ CASES: list[tuple[str, str | None, str]] = [
     ("ᐃᖃᓗᐃᑦ", "iu", None),
     ("ရန်ကုန်", "my", None),
     # Mixed and edge cases
-    ("富士山", "ja", "Fujisan"),
+    ("富士山", "ja", "Fuji-san"),
     ("新大阪", "ja", "Shin'ōsaka"),
     ("東京", "ko", "東京"),  # hanja: no Korean reader, native kept
     ("कच्छ", "gu", "Kachchh"),
@@ -316,7 +356,22 @@ HINT_CASES: list[tuple[str, str | None, tuple[str, ...], str]] = [
     ("أديس أبابا", "ar", ("Addis Ababa",), "Adīs Abābā"),
     ("كوروني", "ar", ("Koroni",), "Kūrūnī"),
     ("فرنسا", "ar", ("France",), "Faransā"),  # the hand lexicon wins
-    ("東京", "ja", ("Tokyo",), "Tōkyō"),  # other languages ignore hints
+    # Japanese: the reading of a kanji name that spells the entity's name...
+    ("羽田空港", "ja", ("Haneda Airport",), "Haneda Kūkō"),
+    ("国立市", "ja", ("Kunitachi",), "Kunitachi-shi"),
+    ("清水寺", "ja", ("Kiyomizu-dera",), "Kiyomizu-dera"),
+    ("石垣島", "ja", ("Ishigaki-jima",), "Ishigaki-jima"),
+    ("東京", "ja", ("Tokyo",), "Tōkyō"),
+    ("チアパス州", "ja", ("Chiapas",), "Chiapasu-shū"),  # not 州 "su"
+    # ...and a pinyin name marks a Chinese place: Sino-Japanese readings,
+    # unless the dictionary knows the place's Japanese name
+    ("南充市", "ja", ("Nanchong",), "Nanjū-shi"),
+    ("九寨溝", "ja", ("Jiuzhaigou Valley",), "Kyūsaikō"),
+    ("小金県", "ja", ("Xiaojin Xian",), "Shōkin-ken"),
+    ("遼東半島", "ja", ("Liaodong Peninsula",), "Ryōtō Hantō"),
+    ("曲麻莱県", "ja", ("Qumalai Xian",), "Kyokumarai-ken"),
+    ("北京市", "ja", ("Beijing",), "Pekin-shi"),
+    ("青島市", "ja", ("Qingdao",), "Chintao-shi"),
 ]
 
 

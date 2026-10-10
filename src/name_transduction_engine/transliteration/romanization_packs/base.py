@@ -28,7 +28,8 @@ class Context:
     region: str | None  # "TW", "KP"
     tag: str | None  # the tag as given
     # Latin-script names of the same entity ("Venice" for ونیز). A provider
-    # whose script leaves sounds unwritten may use them to choose a reading
+    # whose script leaves sounds unwritten, or can be read in several ways
+    # (Japanese kanji: 羽田 Haneda or Hata), may use them to choose a reading
     hints: tuple[str, ...] = ()
 
 
