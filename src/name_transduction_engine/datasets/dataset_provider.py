@@ -6,6 +6,10 @@ from .wikidata.data_provision import (
     download_wikidata_raw,
     ensure_wikidata_sqlite,
     fetch_published_dataset as fetch_wikidata_dataset,
+    PublishAttention as WikidataPublishAttention,
+    PublishError as WikidataPublishError,
+    PublishOptions as WikidataPublishOptions,
+    publish_wikidata_dataset,
     refresh_wikidata_classes,
 )
 
@@ -18,6 +22,10 @@ __all__ = [
     "download_wikidata_raw",
     "ensure_wikidata_sqlite",
     "fetch_wikidata_dataset",
+    "WikidataPublishAttention",
+    "WikidataPublishError",
+    "WikidataPublishOptions",
+    "publish_wikidata_dataset",
     "refresh_wikidata_classes",
 ]
 

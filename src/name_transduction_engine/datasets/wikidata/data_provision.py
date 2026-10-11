@@ -22,6 +22,12 @@ from .load import (
 )
 from .schema import create_schema, build_indexes
 from .download import fetch_published_dataset
+from .publish import (
+    PublishAttention,
+    PublishError,
+    PublishOptions,
+    publish_wikidata_dataset,
+)
 from .download_raw import download_wikidata_raw
 
 __all__ = [
@@ -31,6 +37,10 @@ __all__ = [
     "download_wikidata_raw",
     "ensure_wikidata_sqlite",
     "fetch_published_dataset",
+    "PublishAttention",
+    "PublishError",
+    "PublishOptions",
+    "publish_wikidata_dataset",
     "refresh_wikidata_classes",
 ]
 

@@ -1,34 +1,57 @@
-# Builds the compact Wikidata dataset in the background (days, resumable).
+# Builds the compact Wikidata dataset in the background (days, resumable),
+# then publishes it as a GitHub release and prunes old releases.
 #
 # Expects: a system user `nte`, the repository at /opt/nte with its uv
-# environment in /opt/nte/.venv, and the class file in
-# /opt/nte/data/raw/wikidata/ (`nte data build wikidata-classes`).
+# environment in /opt/nte/.venv, the class file in
+# /opt/nte/data/raw/wikidata/ (`nte data build wikidata-classes`), and
+# systemd 254 or newer (ImportCredential=; Debian 13 has 257).
+#
+# GitHub token, for publishing: a fine-grained token limited to the
+# repository, with "Contents: Read and write". Store it root-only; systemd
+# hands it to the service, and only `nte data publish` reads it:
+#   sudo install -d -m 0700 /etc/credstore
+#   sudo sh -c 'umask 077; cat > /etc/credstore/nte-github-token'
+#   (paste the token, Enter, Ctrl-D)
+# Without it the build still runs; publishing fails with exit code 2 and
+# the service is not restarted. Fine-grained tokens expire: replace the file
+# before then.
 #
 # Install:
 #   sudo cp nte-wikidata-build.service nte-wikidata-build.timer /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now nte-wikidata-build.timer
-# Start a run now:   sudo systemctl start nte-wikidata-build.service
+# Start a run now:   sudo systemctl start --no-block nte-wikidata-build.service
+#   (without --no-block, systemctl waits until the build ends: days)
 # Follow it:         journalctl -u nte-wikidata-build -f
 # Progress summary:  cd /opt/nte && sudo -u nte .venv/bin/nte data status
+# Publish by hand:   cd /opt/nte && sudo -u nte env \
+#   GITHUB_TOKEN="$(sudo cat /etc/credstore/nte-github-token)" \
+#   .venv/bin/nte data publish wikidata --dry-run   (drop --dry-run to do it)
 #
 # Stopping the service saves progress; the next start resumes. A run that
-# finds the newest dump already built exits at once, so the timer can fire
-# while nothing changed.
+# finds the newest dump already built exits at once and the publish step
+# finds it already published, so the timer can fire while nothing changed.
+# A publish that failed (network) is retried with the next restart.
 
 [Unit]
-Description=NTE: build the compact Wikidata dataset
+Description=NTE: build and publish the compact Wikidata dataset
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=simple
+# The steps run in order; publishing only runs after a successful build
+Type=oneshot
 User=nte
 Group=nte
 # The project directory: data/ is resolved relative to it
 WorkingDirectory=/opt/nte
 ExecStart=/opt/nte/.venv/bin/nte data build wikidata-compact
+ExecStart=/opt/nte/.venv/bin/nte data publish wikidata
 Environment=PYTHONUNBUFFERED=1
+# The token, if present: $CREDENTIALS_DIRECTORY/nte-github-token
+ImportCredential=nte-github-token
+# The build takes days
+TimeoutStartSec=infinity
 
 # Stay out of the way of everything else: lowest CPU and I/O priority, so the
 # build only uses idle time; a memory cap so a spike kills the build (which
@@ -46,9 +69,13 @@ ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/opt/nte/data
 
-# Network failures end the run with an error; try again later
+# Network failures (exit 1) end the run with an error; try again later.
+# Exit 2: publishing needs attention (token missing or rejected, the
+# release of this dump already published with another dataset); retrying
+# would not help, so the unit fails and stays failed
 Restart=on-failure
 RestartSec=15min
+RestartPreventExitStatus=2
 # SIGTERM: the build finishes the current chunk, writes a checkpoint and
 # exits with 130, which counts as a clean stop
 TimeoutStopSec=120

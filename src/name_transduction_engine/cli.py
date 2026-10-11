@@ -8,7 +8,11 @@ from name_transduction_engine.datasets.dataset_provider import (
     download_wikidata_raw,
     ensure_datasets,
     fetch_wikidata_dataset,
+    publish_wikidata_dataset,
     refresh_wikidata_classes,
+    WikidataPublishAttention,
+    WikidataPublishError,
+    WikidataPublishOptions,
 )
 from name_transduction_engine.datasets.wikidata.classes import (
     DEFAULT_SPARQL_ENDPOINT,
@@ -102,6 +106,23 @@ def cmd_data_build(args: argparse.Namespace) -> int:
         refresh_wikidata_classes(endpoint=args.endpoint, forecast=args.forecast)
     elif args.target == "models":
         ensure_models(args.force)
+    return 0
+
+
+def cmd_data_publish(args: argparse.Namespace) -> int:
+    """Exit codes: 0 published or nothing to do, 1 failed (try again later),
+    2 needs attention (token, conflicting release, local data)"""
+    options = WikidataPublishOptions(
+        keep=args.keep, replace=args.replace, dry_run=args.dry_run
+    )
+    try:
+        publish_wikidata_dataset(options)
+    except WikidataPublishAttention as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except WikidataPublishError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -531,6 +552,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="also print rough item counts per kind",
     )
     p_build.set_defaults(func=cmd_data_build)
+
+    p_publish = data_sub.add_parser(
+        "publish",
+        help="publish the built Wikidata dataset as a GitHub release",
+        description=(
+            "wikidata: upload data/build/wikidata/compact as the release "
+            "wikidata-YYYYMMDD (a draft until every file is uploaded and "
+            "checked), then delete releases older than the newest --keep. "
+            "Interrupted uploads continue on the next run; a dataset already "
+            "published is not uploaded again. Needs a token with write access "
+            "to the repository's contents in GITHUB_TOKEN (or the systemd "
+            "credential nte-github-token). Exit code 2: needs attention, 1: try "
+            "again later."
+        ),
+    )
+    p_publish.add_argument("target", choices=["wikidata"])
+    p_publish.add_argument(
+        "--keep",
+        type=int,
+        default=2,
+        metavar="N",
+        help="published Wikidata releases to keep (default 2)",
+    )
+    p_publish.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace a release of the same dump published with another "
+        "dataset (e.g. after --refinalize)",
+    )
+    p_publish.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be uploaded and deleted without changing anything",
+    )
+    p_publish.set_defaults(func=cmd_data_publish)
 
     p_status = data_sub.add_parser("status", help="show dataset state")
     p_status.set_defaults(func=cmd_data_status)

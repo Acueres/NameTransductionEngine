@@ -13,16 +13,12 @@ an interrupted fetch continues where it stopped.
 """
 
 import os
-import re
 import shutil
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
-import requests
-
-from name_transduction_engine.datasets.shared import build_session, get_and_save_file
+from name_transduction_engine.datasets.shared import get_and_save_file
 from name_transduction_engine.paths import WIKIDATA_DOWNLOAD_DIR
 from . import classes as C
 from .compact import (
@@ -32,62 +28,18 @@ from .compact import (
     parse_manifest,
     sha256_file,
 )
-
-GITHUB_REPO: Final[str] = "Acueres/NameTransductionEngine"
-GITHUB_API: Final[str] = "https://api.github.com"
-RELEASE_TAG_RE: Final = re.compile(r"^wikidata-(\d{8})$")
-USER_AGENT: Final[str] = (
-    "NameTransductionEngine/0.1 (+https://github.com/Acueres/NameTransductionEngine)"
-)
+from .github import GITHUB_REPO, GitHub, GitHubError, Release
 
 
 class FetchError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class Release:
-    tag: str
-    snapshot: str
-    assets: dict[str, str]  # asset name -> download URL
-
-
-def _session() -> requests.Session:
-    session = build_session()
-    session.headers["User-Agent"] = USER_AGENT
-    return session
-
-
-def list_releases(session: requests.Session) -> list[Release]:
-    """Published Wikidata datasets, newest first"""
-    # The repository is public: no token. Listing releases is one API call
-    # per fetch (unauthenticated limit: 60 an hour per IP); the asset
-    # downloads themselves are not rate limited
-    headers = {"Accept": "application/vnd.github+json"}
-
-    releases: list[Release] = []
-    url: str | None = f"{GITHUB_API}/repos/{GITHUB_REPO}/releases?per_page=100"
-    while url:
-        response = session.get(url, headers=headers, timeout=(15, 60))
-        if response.status_code == 403 and "rate limit" in response.text.lower():
-            raise FetchError("GitHub API rate limit reached; try again in an hour")
-        response.raise_for_status()
-        for item in response.json():
-            match = RELEASE_TAG_RE.match(item.get("tag_name", ""))
-            if not match or item.get("draft"):
-                continue
-            assets = {
-                asset["name"]: asset["browser_download_url"]
-                for asset in item.get("assets", [])
-            }
-            releases.append(Release(item["tag_name"], match.group(1), assets))
-        url = response.links.get("next", {}).get("url")
-
-    return sorted(releases, key=lambda r: r.snapshot, reverse=True)
-
-
-def find_release(session: requests.Session, tag: str | None = None) -> Release:
-    releases = list_releases(session)
+def find_release(github: GitHub, tag: str | None = None) -> Release:
+    try:
+        releases = [r for r in github.releases() if not r.draft]
+    except GitHubError as exc:
+        raise FetchError(str(exc)) from exc
     if not releases:
         raise FetchError(
             f"no published Wikidata dataset (release tagged wikidata-YYYYMMDD) "
@@ -112,12 +64,18 @@ def fetch_published_dataset(
     """Download the newest (or the tagged) published dataset into
     data/raw/wikidata/compact. Returns it"""
     target = target or WIKIDATA_DOWNLOAD_DIR
-    session = _session()
-    release = find_release(session, tag)
+    with GitHub() as github:
+        return _fetch(github, find_release(github, tag), all_groups, force, target)
+
+
+def _fetch(
+    github: GitHub, release: Release, all_groups: bool, force: bool, target: Path
+) -> CompactDataset:
+    session = github.session
 
     if MANIFEST_NAME not in release.assets:
         raise FetchError(f"release {release.tag} has no {MANIFEST_NAME}")
-    manifest_bytes = _get(session, release.assets[MANIFEST_NAME])
+    manifest_bytes = github.download(release.assets[MANIFEST_NAME].url)
     manifest = parse_manifest(manifest_bytes, f"{release.tag}/{MANIFEST_NAME}")
 
     groups = list(manifest["groups"]) if all_groups else list(C.LOADED_GROUPS)
@@ -159,7 +117,9 @@ def fetch_published_dataset(
             continue
         if name not in release.assets:
             raise FetchError(f"release {release.tag} has no asset {name}")
-        get_and_save_file(session=session, url=release.assets[name], output_path=path)
+        get_and_save_file(
+            session=session, url=release.assets[name].url, output_path=path
+        )
         if not _intact(path, part):
             path.unlink()
             raise FetchError(
@@ -186,12 +146,6 @@ def fetch_published_dataset(
     assert dataset is not None
     print(f"Wikidata dataset {dataset.dataset_id} saved to {target}")
     return dataset
-
-
-def _get(session: requests.Session, url: str) -> bytes:
-    response = session.get(url, timeout=(15, 120))
-    response.raise_for_status()
-    return response.content
 
 
 def _intact(path: Path, part: dict[str, Any]) -> bool:
