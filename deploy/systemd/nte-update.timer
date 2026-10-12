@@ -1,4 +1,4 @@
-# Runs `nte update` every night at 04:30 Almaty time. Most nights it finds
+# Runs `nte update` every night at 04:30 Zurich time. Most nights it finds
 # nothing new and ends within seconds; a rebuild (every couple of months)
 # happens in the quietest hours.
 #

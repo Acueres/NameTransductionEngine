@@ -4,9 +4,10 @@
 # itself unavailable (data/maintenance.json); when nothing changed it ends
 # within seconds.
 #
-# Expects: a system user `nte` and the repository at /opt/nte with its uv
-# environment in /opt/nte/.venv, as for nte-wikidata-build.service. Run on
-# the machine that serves NTE.
+# Expects: a system user `nte` and the repository cloned to
+# /opt/nte/NameTransductionEngine with its uv environment in .venv inside it
+# (`uv sync`), as for nte-wikidata-build.service. Run on the machine that
+# serves NTE.
 #
 # Install:
 #   sudo cp nte-update.service nte-update.timer /etc/systemd/system/
@@ -15,7 +16,11 @@
 # Run now:        sudo systemctl start --no-block nte-update.service
 # Follow it:      journalctl -u nte-update -f
 # What it would do, without doing it:
-#   cd /opt/nte && sudo -u nte .venv/bin/nte update --check
+#   cd /opt/nte/NameTransductionEngine && sudo -u nte .venv/bin/nte update --check
+
+# Paths: the repository is assumed at /opt/nte/NameTransductionEngine. If it
+# is elsewhere, change WorkingDirectory, ExecStart and ReadWritePaths
+# below (and the paths in these comments).
 
 [Unit]
 Description=NTE: refresh the data sources and rebuild what changed
@@ -26,8 +31,8 @@ After=network-online.target
 Type=oneshot
 User=nte
 Group=nte
-WorkingDirectory=/opt/nte
-ExecStart=/opt/nte/.venv/bin/nte update
+WorkingDirectory=/opt/nte/NameTransductionEngine
+ExecStart=/opt/nte/NameTransductionEngine/.venv/bin/nte update
 Environment=PYTHONUNBUFFERED=1
 # A full rebuild (GeoNames, Wikidata and the models) takes hours on a
 # small machine
@@ -44,7 +49,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/nte/data
+ReadWritePaths=/opt/nte/NameTransductionEngine/data
 
 # Not restarted on failure: a source that could not be downloaded keeps its
 # old copy and is tried again on the next run

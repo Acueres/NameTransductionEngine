@@ -1,10 +1,11 @@
 # Builds the compact Wikidata dataset in the background (days, resumable),
 # then publishes it as a GitHub release and prunes old releases.
 #
-# Expects: a system user `nte`, the repository at /opt/nte with its uv
-# environment in /opt/nte/.venv, the class file in
-# /opt/nte/data/raw/wikidata/ (`nte data build wikidata-classes`), and
-# systemd 254 or newer (ImportCredential=; Debian 13 has 257).
+# Expects: a system user `nte`, the repository cloned to
+# /opt/nte/NameTransductionEngine with its uv environment in .venv inside it
+# (`uv sync`), the class file in data/raw/wikidata/ there
+# (`nte data build wikidata-classes`), and systemd 254 or newer
+# (ImportCredential=; Debian 13 has 257).
 #
 # GitHub token, for publishing: a fine-grained token limited to the
 # repository, with "Contents: Read and write". Store it root-only; systemd
@@ -23,8 +24,8 @@
 # Start a run now:   sudo systemctl start --no-block nte-wikidata-build.service
 #   (without --no-block, systemctl waits until the build ends: days)
 # Follow it:         journalctl -u nte-wikidata-build -f
-# Progress summary:  cd /opt/nte && sudo -u nte .venv/bin/nte data status
-# Publish by hand:   cd /opt/nte && sudo -u nte env \
+# Progress summary:  cd /opt/nte/NameTransductionEngine && sudo -u nte .venv/bin/nte data status
+# Publish by hand:   cd /opt/nte/NameTransductionEngine && sudo -u nte env \
 #   GITHUB_TOKEN="$(sudo cat /etc/credstore/nte-github-token)" \
 #   .venv/bin/nte data publish wikidata --dry-run   (drop --dry-run to do it)
 #
@@ -44,9 +45,9 @@ Type=oneshot
 User=nte
 Group=nte
 # The project directory: data/ is resolved relative to it
-WorkingDirectory=/opt/nte
-ExecStart=/opt/nte/.venv/bin/nte data build wikidata-compact
-ExecStart=/opt/nte/.venv/bin/nte data publish wikidata
+WorkingDirectory=/opt/nte/NameTransductionEngine
+ExecStart=/opt/nte/NameTransductionEngine/.venv/bin/nte data build wikidata-compact
+ExecStart=/opt/nte/NameTransductionEngine/.venv/bin/nte data publish wikidata
 Environment=PYTHONUNBUFFERED=1
 # The token, if present: $CREDENTIALS_DIRECTORY/nte-github-token
 ImportCredential=nte-github-token
@@ -67,7 +68,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/nte/data
+ReadWritePaths=/opt/nte/NameTransductionEngine/data
 
 # Network failures (exit 1) end the run with an error; try again later.
 # Exit 2: publishing needs attention (token missing or rejected, the
