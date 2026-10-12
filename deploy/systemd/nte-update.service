@@ -1,0 +1,50 @@
+# Refreshes NTE's data (`nte update`): the language codes and GeoNames once
+# they are older than 60 days, the newest published Wikidata dataset, then
+# rebuilds whatever in names.sqlite changed. While it rebuilds, NTE reports
+# itself unavailable (data/maintenance.json); when nothing changed it ends
+# within seconds.
+#
+# Expects: a system user `nte` and the repository at /opt/nte with its uv
+# environment in /opt/nte/.venv, as for nte-wikidata-build.service. Run on
+# the machine that serves NTE.
+#
+# Install:
+#   sudo cp nte-update.service nte-update.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nte-update.timer
+# Run now:        sudo systemctl start --no-block nte-update.service
+# Follow it:      journalctl -u nte-update -f
+# What it would do, without doing it:
+#   cd /opt/nte && sudo -u nte .venv/bin/nte update --check
+
+[Unit]
+Description=NTE: refresh the data sources and rebuild what changed
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=nte
+Group=nte
+WorkingDirectory=/opt/nte
+ExecStart=/opt/nte/.venv/bin/nte update
+Environment=PYTHONUNBUFFERED=1
+# A full rebuild (GeoNames, Wikidata and the models) takes hours on a
+# small machine
+TimeoutStartSec=12h
+
+# Below normal priority, but above the Wikidata build (Nice=19, idle I/O),
+# so a rebuild during a build finishes first and the downtime stays short
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+# Only data/ is writable
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/nte/data
+
+# Not restarted on failure: a source that could not be downloaded keeps its
+# old copy and is tried again on the next run

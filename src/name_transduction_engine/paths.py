@@ -7,7 +7,13 @@ RAW_DIR_LANGUAGE_CODES = PROJECT_ROOT / "data" / "raw" / "language_codes"
 BUILD_DIR = PROJECT_ROOT / "data" / "build"
 MODELS_DIR = PROJECT_ROOT / "data" / "models"
 
-DB_PATH = PROJECT_ROOT / "data" / "names.sqlite"
+DATA_DIR = PROJECT_ROOT / "data"
+DB_PATH = DATA_DIR / "names.sqlite"
+# Present while `nte update` rebuilds names.sqlite: other commands (and the
+# API) report NTE as unavailable meanwhile
+MAINTENANCE_NOTICE_PATH = DATA_DIR / "maintenance.json"
+# Held by `nte init` and `nte update`, so two never rebuild at once
+DATA_LOCK_PATH = DATA_DIR / ".nte-data.lock"
 BUILTIN_PACKS_DIR = PROJECT_ROOT / "packs"
 
 # Optional local copies of dated dumps (`nte data fetch wikidata-raw`), named

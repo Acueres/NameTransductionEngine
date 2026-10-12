@@ -25,6 +25,8 @@ REQUIRED_TABLES = {
 }
 
 REGISTRY_FINGERPRINT_KEY = "language_registry_fingerprint"
+# The downloaded files the registry was built from (datasets/sources.py)
+SOURCE_ID_KEY = "language_codes_source_id"
 
 # IANA scopes that never become registry records. `special` codes (mul, und,
 # zxx, mis) are handled by _SPECIAL_STATUS; `collection` codes (sla, ber, ...)
@@ -259,10 +261,12 @@ def build_registry(
 # Readiness
 
 
-def is_language_codes_ready(db_path: Path) -> bool:
+def is_language_codes_ready(db_path: Path, expected_source: str | None = None) -> bool:
     """Ready means the stored registry reads back intact under this code's tag
     rules. That single check covers missing tables, an old rules version, a
-    partial build (fingerprint mismatch) and an empty table"""
+    partial build (fingerprint mismatch) and an empty table. With
+    `expected_source`, the registry must also have been built from those
+    downloaded files"""
     if not db_path.exists():
         return False
 
@@ -277,6 +281,13 @@ def is_language_codes_ready(db_path: Path) -> bool:
             }
             if not REQUIRED_TABLES <= existing_tables:
                 return False
+            if expected_source is not None:
+                built_from = conn.execute(
+                    "SELECT value FROM build_metadata WHERE key = ?",
+                    (SOURCE_ID_KEY,),
+                ).fetchone()
+                if built_from is None or built_from[0] != expected_source:
+                    return False
             return len(read_registry(conn)) > 0
         finally:
             conn.close()
@@ -310,7 +321,13 @@ def load_all_data(conn: sqlite3.Connection) -> LanguageRegistry:
     return registry
 
 
-def write_build_metadata(conn: sqlite3.Connection) -> None:
+def write_build_metadata(conn: sqlite3.Connection, source: str | None = None) -> None:
+    conn.execute("DELETE FROM build_metadata WHERE key = ?", (SOURCE_ID_KEY,))
+    if source is not None:
+        conn.execute(
+            "INSERT INTO build_metadata (key, value) VALUES (?, ?)",
+            (SOURCE_ID_KEY, source),
+        )
     counts = {
         "language_count": "language",
         "language_alias_count": "language_alias",

@@ -32,6 +32,12 @@ from name_transduction_engine.datasets.maintenance import (
     format_clean_report,
 )
 from name_transduction_engine import paths
+from name_transduction_engine.datasets.availability import (
+    DataBusy,
+    clear_stale_notice,
+    data_lock,
+)
+from name_transduction_engine.datasets.update import DEFAULT_MAX_AGE_DAYS, run_update
 from name_transduction_engine.transduction.lookup.lookup_engine import (
     ROMANIZATION_MODES,
     lookup_name,
@@ -64,11 +70,25 @@ from name_transduction_engine.datasets.language_codes.info import (
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    ensure_datasets(args.force)
-    # Models are learned from the datasets, so they come after them
-    ensure_models(args.force)
-    ensure_builtin_packs()
+    try:
+        with data_lock():
+            clear_stale_notice()
+            ensure_datasets(args.force)
+            # Models are learned from the datasets, so they come after them
+            ensure_models(args.force)
+            ensure_builtin_packs()
+    except DataBusy as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    try:
+        return run_update(max_age_days=args.max_age, check=args.check)
+    except DataBusy as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_data_fetch(args: argparse.Namespace) -> int:
@@ -436,6 +456,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_init.set_defaults(func=cmd_init)
 
+    p_update = sub.add_parser(
+        "update",
+        help="refresh the data sources and rebuild what changed",
+        description=(
+            "Download the language-code lists and GeoNames again when the "
+            "local copy is older than --max-age days (GeoNames exports a new "
+            "dump daily), fetch the newest published Wikidata dataset, then "
+            "rebuild whatever in names.sqlite and the models changed. While "
+            "it rebuilds, NTE reports itself unavailable. Does nothing when "
+            "nothing changed, so it can run on a schedule."
+        ),
+    )
+    p_update.add_argument(
+        "--max-age",
+        type=int,
+        default=DEFAULT_MAX_AGE_DAYS,
+        metavar="DAYS",
+        help=f"refresh GeoNames and the language codes when older than this "
+        f"(default {DEFAULT_MAX_AGE_DAYS})",
+    )
+    p_update.add_argument(
+        "--check",
+        action="store_true",
+        help="only report what would be downloaded and rebuilt",
+    )
+    p_update.set_defaults(func=cmd_update)
+
     # data <subcommand>
     p_data = sub.add_parser("data", help="manage raw and built datasets")
     data_sub = p_data.add_subparsers(
@@ -629,7 +676,7 @@ def build_parser() -> argparse.ArgumentParser:
         "readable handle for any script; 'pretty' is the conventional "
         "romanization shown to end users (Tōkyō, Kyiv, Beijing)",
     )
-    p_lookup.set_defaults(func=cmd_lookup)
+    p_lookup.set_defaults(func=cmd_lookup, needs_data=True)
 
     # Language information
     p_lang = sub.add_parser(
@@ -662,12 +709,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=25,
         help="rows to show for --search/--list (0 = all; default 25)",
     )
-    p_lang.set_defaults(func=cmd_lang)
+    p_lang.set_defaults(func=cmd_lang, needs_data=True)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")
     p_ex.add_argument("name")
     p_ex.add_argument("--to", required=True, metavar="LANG")
-    p_ex.set_defaults(func=cmd_explain)
+    p_ex.set_defaults(func=cmd_explain, needs_data=True)
 
     return parser

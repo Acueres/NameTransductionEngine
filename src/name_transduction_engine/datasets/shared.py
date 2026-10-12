@@ -41,7 +41,10 @@ def get_and_save_file(
     url: str,
     output_path: Path,
     chunk_size: int = 256 * 1024,
+    response_headers: dict[str, str] | None = None,
 ) -> Path:
+    """Stream `url` to `output_path` (via a .part file). `response_headers`,
+    when given, receives the response's headers"""
     temp_path = output_path.with_suffix(output_path.suffix + ".part")
 
     try:
@@ -49,6 +52,8 @@ def get_and_save_file(
 
         with session.get(url, stream=True, timeout=(10, 30)) as response:
             response.raise_for_status()
+            if response_headers is not None:
+                response_headers.update(response.headers)
 
             total_size = int(response.headers.get("Content-Length", 0))
             downloaded_size = 0

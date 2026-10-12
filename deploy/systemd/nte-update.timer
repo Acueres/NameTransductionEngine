@@ -1,0 +1,16 @@
+# Runs `nte update` every night at 04:30 Almaty time. Most nights it finds
+# nothing new and ends within seconds; a rebuild (every couple of months)
+# happens in the quietest hours.
+#
+# Missed runs (the machine was off) are not caught up later: a rebuild
+# would then start in the daytime. The next night's run does the work.
+
+[Unit]
+Description=NTE: refresh the data every night
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Europe/Zurich
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -19,6 +19,9 @@ from .schema import LANGUAGE_TAG_TABLE
 
 # build_metadata key: the registry fingerprint the `lang` columns were built with
 REGISTRY_FINGERPRINT_KEY = "geonames_language_registry_fingerprint"
+# The downloaded files it was loaded from (datasets/sources.py) and their date
+SOURCE_ID_KEY = "geonames_source_id"
+SNAPSHOT_KEY = "geonames_snapshot"
 
 GEONAME_COLUMNS = [
     "geonameid",
@@ -113,7 +116,9 @@ REQUIRED_TABLE_COLUMNS = {
 REQUIRED_POPULATED_TABLES = ("geoname", "alternate_name", LANGUAGE_TAG_TABLE)
 
 
-def is_geonames_ready(db_path: Path) -> bool:
+def is_geonames_ready(db_path: Path, expected_source: str | None = None) -> bool:
+    """The tables exist, are filled, match the current language registry
+    and, when `expected_source` is given, were loaded from those files"""
     if not db_path.exists():
         return False
 
@@ -157,6 +162,16 @@ def is_geonames_ready(db_path: Path) -> bool:
             current = stored_registry_fingerprint(conn)
             if built_with is None or current is None or built_with[0] != current:
                 return False
+
+            # Loaded from the files downloaded now (a refreshed download
+            # makes this false, so GeoNames is reloaded from it)
+            if expected_source is not None:
+                loaded_from = conn.execute(
+                    "SELECT value FROM build_metadata WHERE key = ?",
+                    (SOURCE_ID_KEY,),
+                ).fetchone()
+                if loaded_from is None or loaded_from[0] != expected_source:
+                    return False
 
             return True
         finally:
@@ -332,7 +347,15 @@ def _load_alternate_name_table(
         conn.commit()
 
 
-def write_build_metadata(conn: sqlite3.Connection, registry: LanguageRegistry) -> None:
+def write_build_metadata(
+    conn: sqlite3.Connection,
+    registry: LanguageRegistry,
+    source: str | None = None,
+    snapshot: str | None = None,
+) -> None:
+    conn.execute(
+        "DELETE FROM build_metadata WHERE key IN (?, ?)", (SOURCE_ID_KEY, SNAPSHOT_KEY)
+    )
     metadata = {
         REGISTRY_FINGERPRINT_KEY: registry.fingerprint,
         "source": "GeoNames",
@@ -343,6 +366,10 @@ def write_build_metadata(conn: sqlite3.Connection, registry: LanguageRegistry) -
             conn.execute("SELECT COUNT(*) FROM alternate_name").fetchone()[0]
         ),
     }
+    if source is not None:
+        metadata[SOURCE_ID_KEY] = source
+    if snapshot is not None:
+        metadata[SNAPSHOT_KEY] = snapshot
 
     conn.executemany(
         "INSERT OR REPLACE INTO build_metadata (key, value) VALUES (?, ?)",

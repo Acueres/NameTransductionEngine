@@ -25,6 +25,7 @@ from pathlib import Path
 
 from name_transduction_engine.datasets.geonames.load import (
     REGISTRY_FINGERPRINT_KEY as GEONAMES_REGISTRY_FINGERPRINT_KEY,
+    SOURCE_ID_KEY as GEONAMES_SOURCE_ID_KEY,
     is_geonames_ready,
 )
 from name_transduction_engine.paths import DB_PATH
@@ -35,6 +36,9 @@ _INPUT_KEYS = (
     "geoname_count",
     "alternate_name_count",
 )
+# Part of the fingerprint when present: the downloaded GeoNames files. Older
+# builds lack it, and their models stay valid until GeoNames is reloaded
+_OPTIONAL_INPUT_KEYS = (GEONAMES_SOURCE_ID_KEY,)
 
 
 @dataclass(frozen=True)
@@ -68,19 +72,20 @@ class GeoNamesModelSpec:
 
 def input_fingerprint(conn: sqlite3.Connection) -> str | None:
     """Fingerprint of the GeoNames build in the database, None without one"""
+    keys = _INPUT_KEYS + _OPTIONAL_INPUT_KEYS
     try:
         rows = dict(
             conn.execute(
                 f"SELECT key, value FROM build_metadata WHERE key IN "
-                f"({', '.join('?' for _ in _INPUT_KEYS)})",
-                _INPUT_KEYS,
+                f"({', '.join('?' for _ in keys)})",
+                keys,
             )
         )
     except sqlite3.DatabaseError:
         return None
     if any(k not in rows for k in _INPUT_KEYS):
         return None
-    text = "|".join(f"{k}={rows[k]}" for k in _INPUT_KEYS)
+    text = "|".join(f"{k}={rows[k]}" for k in keys if k in rows)
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 

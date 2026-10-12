@@ -1,6 +1,6 @@
 import sqlite3
 
-from .download import download_geonames_data
+from .download import GEONAMES_FILES, download_geonames_data
 from .schema import create_schema, build_indexes
 from .load import (
     is_geonames_ready,
@@ -17,21 +17,29 @@ from name_transduction_engine.datasets.language_codes.data_provision import (
 from name_transduction_engine.normalization.language_code_normalization import (
     RegistryError,
 )
-from name_transduction_engine.paths import DB_PATH
+from name_transduction_engine.datasets.sources import snapshot_date, source_id
+from name_transduction_engine.paths import DB_PATH, RAW_DIR_GEONAMES
 
 __all__ = [
+    "current_geonames_source",
     "ensure_geonames_sqlite",
 ]
+
+
+def current_geonames_source() -> str | None:
+    """The source_id of the downloaded GeoNames files; None when they were
+    not recorded (downloaded by an older NTE) or are missing"""
+    return source_id(RAW_DIR_GEONAMES, GEONAMES_FILES)
 
 
 def ensure_geonames_sqlite(force=False) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    if not force and is_geonames_ready(DB_PATH):
+    if not force and is_geonames_ready(DB_PATH, current_geonames_source()):
         print(f"GeoNames is ready: {DB_PATH}")
         return
 
-    print("GeoNames missing or invalid. Rebuilding from scratch...")
+    print("GeoNames missing, outdated or invalid. Rebuilding from scratch...")
 
     download_geonames_data(force)
 
@@ -43,7 +51,13 @@ def ensure_geonames_sqlite(force=False) -> None:
         create_schema(conn)
         load_all_data(conn, registry)
         build_indexes(conn)
-        write_build_metadata(conn, registry)
+        source = current_geonames_source()
+        write_build_metadata(
+            conn,
+            registry,
+            source,
+            snapshot_date(RAW_DIR_GEONAMES, "allCountries.zip"),
+        )
 
         conn.commit()
     except Exception:
@@ -56,7 +70,7 @@ def ensure_geonames_sqlite(force=False) -> None:
         except Exception:
             pass
 
-    if not is_geonames_ready(DB_PATH):
+    if not is_geonames_ready(DB_PATH, current_geonames_source()):
         raise RuntimeError("GeoNames build finished, but validation failed.")
 
     print(f"GeoNames built successfully: {DB_PATH}")

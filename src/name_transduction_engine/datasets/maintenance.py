@@ -27,6 +27,13 @@ from .geonames.load import (
     is_geonames_ready,
 )
 from .geonames.schema import LANGUAGE_TAG_TABLE as GEONAMES_LANGUAGE_TAG_TABLE
+from .geonames.load import SOURCE_ID_KEY as GEONAMES_SOURCE_ID_KEY
+from .geonames.data_provision import current_geonames_source
+from .geonames.download import GEONAMES_FILES
+from .language_codes.data_provision import current_language_codes_source
+from .language_codes.download import LANGUAGE_CODES_URLS
+from .sources import downloaded_at, snapshot_date
+from .availability import MaintenanceNotice, read_notice
 from .wikidata.load import (
     DATASET_ID_KEY as WIKIDATA_DATASET_ID_KEY,
     REGISTRY_FINGERPRINT_KEY as WIKIDATA_REGISTRY_FINGERPRINT_KEY,
@@ -128,6 +135,9 @@ class DataStatus:
     partial_files: list[ArtifactStatus]
     models: list[ModelStatus] = field(default_factory=list)
     wikidata_build: WikidataBuildStatus | None = None
+    # (label, downloaded at "YYYY-MM-DD" or None, upstream date or None)
+    downloads: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+    notice: MaintenanceNotice | None = None
 
 
 def _artifact(name: str, path: Path) -> ArtifactStatus:
@@ -267,7 +277,9 @@ def collect_data_status() -> DataStatus:
             try:
                 build_metadata = _read_build_metadata(conn)
 
-                language_codes_ready = is_language_codes_ready(DB_PATH)
+                language_codes_ready = is_language_codes_ready(
+                    DB_PATH, current_language_codes_source()
+                )
                 sources.append(
                     SourceStatus(
                         source="language_codes",
@@ -278,7 +290,7 @@ def collect_data_status() -> DataStatus:
                 for source, ready, tables, tag_table, fingerprint_key in (
                     (
                         "geonames",
-                        is_geonames_ready(DB_PATH),
+                        is_geonames_ready(DB_PATH, current_geonames_source()),
                         _GEONAMES_TABLES,
                         GEONAMES_LANGUAGE_TAG_TABLE,
                         GEONAMES_REGISTRY_FINGERPRINT_KEY,
@@ -298,6 +310,16 @@ def collect_data_status() -> DataStatus:
                             if not language_codes_ready
                             else _registry_mismatch(build_metadata, fingerprint_key)
                         )
+                        if (
+                            reason is None
+                            and source == "geonames"
+                            and build_metadata.get(GEONAMES_SOURCE_ID_KEY)
+                            not in (None, current_geonames_source())
+                        ):
+                            reason = (
+                                "the GeoNames files were downloaded again; run "
+                                "`nte init` to load them"
+                            )
                         if (
                             reason is None
                             and source == "wikidata"
@@ -361,12 +383,45 @@ def collect_data_status() -> DataStatus:
         partial_files=partial_files,
         models=collect_model_status(),
         wikidata_build=_collect_wikidata_build(),
+        downloads=_collect_downloads(),
+        notice=read_notice(),
     )
+
+
+def _collect_downloads() -> list[tuple[str, str | None, str | None]]:
+    out = []
+    for label, raw_dir, names, main_file in (
+        (
+            "language codes",
+            RAW_DIR_LANGUAGE_CODES,
+            tuple(LANGUAGE_CODES_URLS),
+            None,
+        ),
+        ("GeoNames", RAW_DIR_GEONAMES, GEONAMES_FILES, "allCountries.zip"),
+    ):
+        when = downloaded_at(raw_dir, names)
+        out.append(
+            (
+                label,
+                when.strftime("%Y-%m-%d") if when else None,
+                snapshot_date(raw_dir, main_file) if main_file else None,
+            )
+        )
+    return out
 
 
 def format_data_status(status: DataStatus) -> str:
     """Render a DataStatus as a human-readable report"""
     lines: list[str] = []
+
+    notice = status.notice
+    if notice is not None and notice.active:
+        lines.append(f"Maintenance: {notice.message}")
+    elif notice is not None:
+        lines.append(
+            f"Maintenance: an update was interrupted ({notice.reason}, started "
+            f"{notice.started_at}); run `nte update` or `nte init`"
+        )
 
     if status.db.exists:
         lines.append(
@@ -389,6 +444,17 @@ def format_data_status(status: DataStatus) -> str:
         lines.append("  build metadata:")
         for key, value in sorted(status.build_metadata.items()):
             lines.append(f"    {key}: {value}")
+
+    if status.downloads:
+        lines.append("Downloaded sources (`nte update` refreshes them when old):")
+        for label, when, upstream in status.downloads:
+            if when is None:
+                lines.append(f"  {label}: not downloaded")
+                continue
+            line = f"  {label}: downloaded {when}"
+            if upstream and upstream != when:
+                line += f" (upstream date {upstream})"
+            lines.append(line)
 
     if status.wikidata_build is not None:
         lines.extend(_format_wikidata_build(status.wikidata_build))
