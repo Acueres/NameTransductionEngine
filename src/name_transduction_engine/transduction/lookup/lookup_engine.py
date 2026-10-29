@@ -6,7 +6,6 @@ from functools import lru_cache
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path
-from typing import Literal
 
 from .db import run_query, get_conn
 from .lookup_entity import LookupEntity
@@ -19,11 +18,8 @@ from name_transduction_engine.normalization.language_code_normalization import (
     LanguageTag,
     resolve_user_language,
 )
-from name_transduction_engine.transliteration.diagnostic_romanizer import (
-    DiagnosticRomanizer,
-)
-from name_transduction_engine.transliteration.display_romanizer import (
-    DisplayRomanizer,
+from name_transduction_engine.transliteration.romanizer import (
+    Romanizer,
 )
 from name_transduction_engine.datasets.dataset_provider import read_registry
 from name_transduction_engine.paths import DB_PATH
@@ -38,7 +34,7 @@ from name_transduction_engine.paths import DB_PATH
 # Ordering: GeoNames before Wikidata, then entity ID numerically, then names in record order.
 #
 # Each row also carries the entity's reference names: the GeoNames primary
-# name and up to five English names ("|"-separated). The display romanizer
+# name and up to five English names ("|"-separated). The romanizer
 # may use them to read scripts that leave vowels unwritten (Persian ونیز,
 # guided by "Venice").
 
@@ -146,12 +142,6 @@ ORDER BY
 """
 
 
-# "debug": uroman, a readable handle for any script (DiagnosticRomanizer)
-# "pretty": the conventional romanization for end users (DisplayRomanizer)
-RomanizationMode = Literal["debug", "pretty"]
-ROMANIZATION_MODES: tuple[RomanizationMode, ...] = ("debug", "pretty")
-
-
 @dataclass(frozen=True)
 class LookupResult:
     language: LanguageQuery
@@ -162,7 +152,6 @@ def lookup_name(
     name: str,
     lang: str,
     db_path: str | Path = DB_PATH,
-    romanization: RomanizationMode = "debug",
 ) -> LookupResult:
     language = resolve_user_language(lang, _registry(db_path))
     tag = language.tag
@@ -194,7 +183,7 @@ def lookup_name(
 
     grouped_candidates = _group_lookup_candidates(candidates)
     romanized_candidates = _romanize_lookup_names(
-        grouped_candidates, _romanizer(romanization), query_name=name
+        grouped_candidates, _romanizer(), query_name=name
     )
     return LookupResult(language=language, entities=romanized_candidates)
 
@@ -256,21 +245,17 @@ def _group_lookup_candidates(
     return entities
 
 
-@lru_cache(maxsize=None)
-def _romanizer(mode: RomanizationMode) -> DiagnosticRomanizer | DisplayRomanizer:
-    if mode == "pretty":
-        return DisplayRomanizer()
-    if mode == "debug":
-        return DiagnosticRomanizer()
-    raise ValueError(f"unknown romanization mode {mode!r}")
+@lru_cache(maxsize=1)
+def _romanizer() -> Romanizer:
+    return Romanizer()
 
 
 def _romanize_lookup_names(
     entities: list[LookupEntity],
-    rm: DiagnosticRomanizer | DisplayRomanizer,
+    rm: Romanizer,
     query_name: str | None = None,
 ) -> list[LookupEntity]:
-    """Romanize every name. The display romanizer also gets the entity's
+    """Romanize every name. The romanizer also gets the entity's
     reference names and the query (which resolved to this entity) as hints"""
     result: list[LookupEntity] = []
 
@@ -279,11 +264,7 @@ def _romanize_lookup_names(
         romanized_names = tuple(
             LookupName(
                 name=n.name,
-                romanization=(
-                    rm.romanize(n.name, n.language_code, hints)
-                    if isinstance(rm, DisplayRomanizer)
-                    else rm.romanize(n.name, n.language_code)
-                ),
+                romanization=(rm.romanize(n.name, n.language_code, hints)),
                 language_code=n.language_code,
             )
             for n in entity.names

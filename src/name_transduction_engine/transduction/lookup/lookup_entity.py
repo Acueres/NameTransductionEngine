@@ -15,5 +15,5 @@ class LookupEntity:
     names: tuple[LookupName, ...]
 
     # Latin-script names of the entity (GeoNames primary name, English
-    # names), used as reading hints by the display romanizer
+    # names), used as reading hints by the romanizer
     reference_names: tuple[str, ...] = ()

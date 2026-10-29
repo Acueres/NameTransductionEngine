@@ -2,6 +2,8 @@ import argparse
 import sqlite3
 import sys
 
+from functools import lru_cache
+
 from name_transduction_engine.datasets.dataset_provider import (
     WikidataBuildOptions,
     build_wikidata_compact,
@@ -38,10 +40,9 @@ from name_transduction_engine.datasets.availability import (
     data_lock,
 )
 from name_transduction_engine.datasets.update import DEFAULT_MAX_AGE_DAYS, run_update
-from name_transduction_engine.transduction.lookup.lookup_engine import (
-    ROMANIZATION_MODES,
-    lookup_name,
-)
+from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
+from name_transduction_engine.transduction.lookup.lookup_name import LookupName
+
 from name_transduction_engine.normalization.language_code_normalization import (
     LanguageRegistry,
     RegistryError,
@@ -58,6 +59,7 @@ from name_transduction_engine.datasets.language_codes.info import (
     rows_for_tag,
     search_languages,
 )
+from name_transduction_engine.transliteration.romanizer import Romanizer
 
 # --------------------------------------------------------------------------- #
 # Command handlers
@@ -163,7 +165,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        result = lookup_name(args.name, args.to, romanization=args.romanization)
+        result = lookup_name(args.name, args.to)
     except UnknownLanguageError as exc:
         # The message already carries did-you-mean suggestions
         print(f"error: {exc}", file=sys.stderr)
@@ -178,7 +180,6 @@ def cmd_lookup(args: argparse.Namespace) -> int:
     print(
         f"[lookup] name={args.name!r} "
         f"to={result.language.tag} "
-        f"romanization={args.romanization} "
         f"entities={len(entities)}"
     )
 
@@ -214,7 +215,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
     return 0
 
 
-def _format_name(name) -> str:
+def _format_name(name: LookupName) -> str:
     """Native form first; the romanization only when it adds something (not for
     names already in Latin), flagged when its confidence is low"""
     romanization = name.romanization
@@ -268,6 +269,53 @@ def cmd_lang(args: argparse.Namespace) -> int:
         return 1
     finally:
         conn.close()
+
+
+def cmd_romanize(args: argparse.Namespace) -> int:
+    try:
+        conn = sqlite3.connect(f"file:{paths.DB_PATH}?mode=ro", uri=True)
+    except sqlite3.DatabaseError as exc:
+        print(
+            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
+        )
+        return 1
+
+    try:
+        registry = read_registry(conn)
+        language = resolve_user_language(args.lang, registry)
+        romanizer = _romanizer()
+        romanization = romanizer.romanize(args.text, str(language.tag))
+
+        print(
+            f"[romanize] {args.text!r} from {str(language.tag)}."
+        )
+
+        for note in language.notes:
+            print(f"[note] {note}")
+
+        for warning in romanization.warnings:
+            print(f"[warning] {warning}")
+
+        print(f"[result] {romanization.text} confidence={romanization.confidence}")
+
+        return 0
+    except UnknownLanguageError as exc:
+        # The message already carries did-you-mean suggestions
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (RegistryError, sqlite3.DatabaseError) as exc:
+        print(
+            f"error: language data unavailable ({exc}); run `nte init`",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        conn.close()
+
+
+@lru_cache(maxsize=1)
+def _romanizer() -> Romanizer:
+    return Romanizer()
 
 
 def _lang_show(
@@ -668,14 +716,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also show matched entities that have no name in the target language",
     )
-    p_lookup.add_argument(
-        "--romanization",
-        choices=ROMANIZATION_MODES,
-        default="debug",
-        help="how non-Latin names are romanized: 'debug' (default) is uroman, a "
-        "readable handle for any script; 'pretty' is the conventional "
-        "romanization shown to end users (Tōkyō, Kyiv, Beijing)",
-    )
     p_lookup.set_defaults(func=cmd_lookup, needs_data=True)
 
     # Language information
@@ -683,7 +723,7 @@ def build_parser() -> argparse.ArgumentParser:
         "lang",
         aliases=["language"],
         help="show what a language code or name resolves to, and how many names it has",
-        description="Resolve a language the way `lookup --to` does, and show its "
+        description="Resolve a language and show its "
         "codes, names, macrolanguage relations and name counts per dataset.",
     )
     p_lang.add_argument(
@@ -710,6 +750,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="rows to show for --search/--list (0 = all; default 25)",
     )
     p_lang.set_defaults(func=cmd_lang, needs_data=True)
+
+    # Romanization
+    p_romanization = sub.add_parser(
+        "romanize",
+        help="romanize a name from a given language",
+        description="Romanize TEXT using the conventions of its language. "
+        "Prints the romanization and its confidence (high, normal or low); low means part of the reading was guessed.",
+    )
+    p_romanization.add_argument(
+        "--lang",
+        metavar="LANG",
+        help="code or exact English name, e.g. 'uk', 'persian', 'ko-KP', 'zh-Hant'",
+        required=True,
+    )
+    p_romanization.add_argument(
+        "text",
+        metavar="TEXT",
+        help="the name to romanize (use -- before text that starts with a dash)",
+    )
+
+    p_romanization.set_defaults(func=cmd_romanize, needs_data=True)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")

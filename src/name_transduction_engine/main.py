@@ -23,15 +23,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(
-        main(
-            [
-                "lookup",
-                "Constanţa",
-                "--to",
-                "eu",
-                "--romanization",
-                "pretty",
-            ]
-        )
-    )
+    sys.exit(main(["romanize", "--lang", "ru", "München"]))

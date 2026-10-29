@@ -1,11 +1,11 @@
-"""Golden cases for the display romanizer: (text, lang tag, expected).
+"""Golden cases for the romanizer: (text, lang tag, expected).
 
-Run: uv run python tests/display_romanizer_test.py   (prints mismatches)
+Run: uv run python tests/romanizer_test.py   (prints mismatches)
 """
 
 import sys
 
-from name_transduction_engine.transliteration.display_romanizer import DisplayRomanizer
+from name_transduction_engine.transliteration.romanizer import Romanizer
 
 CASES: list[tuple[str, str | None, str]] = [
     # Latin and neutral input
@@ -376,7 +376,7 @@ HINT_CASES: list[tuple[str, str | None, tuple[str, ...], str]] = [
 
 
 def main() -> int:
-    r = DisplayRomanizer()
+    r = Romanizer()
     bad = 0
     cases = [(t, lang, (), want) for t, lang, want in CASES] + HINT_CASES
     for text, lang, hints, expected in cases:

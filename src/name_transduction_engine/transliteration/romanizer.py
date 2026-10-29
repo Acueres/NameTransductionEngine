@@ -1,7 +1,7 @@
-"""Display romanization: the Latin form of a name shown to end users.
+"""Romanization module: the Latin form of a name shown to end users.
 
-Not reversible and not for matching. Rules are chosen by the name's language
-(and region where it matters), not only by its script:
+Rules are chosen by the name's language
+and region where it matters:
 - 東京 tagged ja is Tōkyō, 北京 tagged zh is Beijing
 - 종로구 is Jongno-gu, but McCune-Reischauer for a name tagged ko-KP
 - Київ tagged uk is Kyiv (Ukrainian national system), Москва tagged ru is
@@ -9,7 +9,7 @@ Not reversible and not for matching. Rules are chosen by the name's language
 
 Each script run of the name goes through a chain and the first usable result
 wins:
-1. the provider for the run's script and language (see display/)
+1. the provider for the run's script and language (see romanization_packs/)
 2. ICU's generic script transform, for scripts where it reads well
 3. uroman
 4. the native form, unchanged
@@ -97,11 +97,11 @@ class _Run:
     text: str
 
 
-class DisplayRomanizer:
+class Romanizer:
     def romanize(
         self, text: str, lang: str | None = None, hints: Sequence[str] = ()
     ) -> Romanization:
-        """Romanize `text` for display. `lang` is the name's language tag
+        """Romanize `text`. `lang` is the name's language tag
         ("ja", "uk", "zh-Hant-TW", "ko-KP"); without it, the language is
         assumed from the script and results carry a warning. `hints` are
         other names of the same entity; Latin-script ones may guide the

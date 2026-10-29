@@ -1,4 +1,4 @@
-"""Shared types for display-romanization providers.
+"""Shared types for romanization providers.
 
 A provider romanizes one script run of a name. It returns a Rendering, returns
 None when it does not apply (wrong language, nothing to do), or raises:
@@ -7,12 +7,12 @@ None when it does not apply (wrong language, nothing to do), or raises:
   (Japanese kanji read as Mandarin, say); the chain stops at the native form
 """
 
+import langcodes
+
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from typing import Callable
-
-import langcodes
 
 from ..romanization import Confidence
 

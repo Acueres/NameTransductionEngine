@@ -1,12 +1,12 @@
 """Last resorts before the native form: ICU's generic script transform, for
 the scripts where its scholarly output still reads well, then uroman"""
 
-from ..diagnostic_romanizer import DiagnosticRomanizer
+from ..fallback_romanizer import FallbackRomanizer
 from ..romanization import IDENTITY
 from . import icu_util
 from .base import Context, Rendering
 
-# ICU "<script>-Latin" is usable for display only where it is a clean,
+# ICU "<script>-Latin" is usable only where it is a clean,
 # phonemic transliteration. Excluded on purpose: abjads (unvoweled consonant
 # strings with dots and rings), Thai (tone letters as diacritics), Canadian
 # syllabics (leaves characters behind), Han (always Mandarin)
@@ -28,7 +28,7 @@ def romanize_icu_generic(script: str, text: str, ctx: Context) -> Rendering | No
         f"icu:{transform}",
         "low",
         (
-            f"no display romanization for this {script} text; scholarly transliteration used",
+            f"no proper romanization for this {script} text; scholarly transliteration used",
         ),
         engine=icu_util.ICU_ENGINE,
         cased=script in _CASED_SCRIPTS,
@@ -40,11 +40,11 @@ def romanize_icu_generic(script: str, text: str, ctx: Context) -> Rendering | No
 _CASED_SCRIPTS = frozenset({"Armn", "Cyrl", "Grek"})
 
 
-_DIAGNOSTIC = DiagnosticRomanizer()
+_FALLBACK = FallbackRomanizer()
 
 
 def romanize_uroman(text: str, ctx: Context) -> Rendering | None:
-    result = _DIAGNOSTIC.romanize(text, ctx.tag)
+    result = _FALLBACK.romanize(text, ctx.tag)
     if result.transform == IDENTITY:
         return None
     return Rendering(
@@ -52,7 +52,7 @@ def romanize_uroman(text: str, ctx: Context) -> Rendering | None:
         result.text.replace("·", ""),
         "uroman",
         "low",
-        ("no display romanization for this text; universal romanization used",)
+        ("no proper romanization for this text; universal romanization used",)
         + result.warnings,
         engine=result.engine_version,
         cased=False,

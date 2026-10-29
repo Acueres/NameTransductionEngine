@@ -1,4 +1,4 @@
-"""Diagnostic romanization: a readable Latin handle for any name, for debugging.
+"""Fallback romanization.
 
 Contract:
 - Input with no non-Latin content (Latin letters, digits, punctuation only) is
@@ -7,7 +7,6 @@ Contract:
   mixed-script input is covered, whichever script dominates.
 - Output is Latin and mostly ASCII, but ASCII is not guaranteed: uroman keeps a
   few marks (the Tibetan tsheg comes out as "·").
-- Not reversible and not a display form. Always show it next to the native name.
 """
 
 from functools import lru_cache
@@ -37,7 +36,7 @@ _SCRIPT_CAVEATS: dict[str, str] = {
 _NO_LANGUAGE = frozenset({"und", "mul", "mis", "zxx"})
 
 
-class DiagnosticRomanizer:
+class FallbackRomanizer:
     def romanize(self, text: str, lang: str | None = None) -> Romanization:
         """Romanize `text`. `lang` is the name's language tag in any form
         langcodes accepts ("uk", "ukr", "zh-Hant"); uroman applies

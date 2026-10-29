@@ -1,4 +1,4 @@
-"""Text helpers shared by the display providers"""
+"""Text helpers shared by the romanization providers"""
 
 import unicodedata
 
