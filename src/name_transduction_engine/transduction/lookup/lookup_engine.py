@@ -1,27 +1,20 @@
 import pandas as pd
 
-from contextlib import closing
-from dataclasses import dataclass
-from functools import lru_cache
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path
 
-from .db import run_query, get_conn
+from ..db import run_query
 from .lookup_entity import LookupEntity
 from .lookup_name import LookupName
 from .lookup_candidate import LookupCandidate
 from name_transduction_engine.normalization.name_normalization import normalize_name
 from name_transduction_engine.normalization.language_code_normalization import (
-    LanguageQuery,
-    LanguageRegistry,
     LanguageTag,
-    resolve_user_language,
 )
 from name_transduction_engine.transliteration.romanizer import (
     Romanizer,
 )
-from name_transduction_engine.datasets.dataset_provider import read_registry
 from name_transduction_engine.paths import DB_PATH
 
 # Resolve (step 1): every entity with any name, in any language, equal to
@@ -142,29 +135,21 @@ ORDER BY
 """
 
 
-@dataclass(frozen=True)
-class LookupResult:
-    language: LanguageQuery
-    entities: list[LookupEntity]
-
-
 def lookup_name(
     name: str,
-    lang: str,
+    language_tag: LanguageTag,
+    romanizer: Romanizer,
     db_path: str | Path = DB_PATH,
-) -> LookupResult:
-    language = resolve_user_language(lang, _registry(db_path))
-    tag = language.tag
-
+) -> list[LookupEntity]:
     df = run_query(
         db_path,
         QUERY,
         {
             "name_norm": normalize_name(name),
-            "lang": tag.lang,
-            "script": tag.script,
-            "region": tag.region,
-            "variant": tag.variant,
+            "lang": language_tag.lang,
+            "script": language_tag.script,
+            "region": language_tag.region,
+            "variant": language_tag.variant,
         },
     )
     candidates = [
@@ -183,15 +168,9 @@ def lookup_name(
 
     grouped_candidates = _group_lookup_candidates(candidates)
     romanized_candidates = _romanize_lookup_names(
-        grouped_candidates, _romanizer(), query_name=name
+        grouped_candidates, romanizer, query_name=name
     )
-    return LookupResult(language=language, entities=romanized_candidates)
-
-
-@lru_cache(maxsize=1)
-def _registry(db_path: str | Path) -> LanguageRegistry:
-    with closing(get_conn(db_path)) as conn:
-        return read_registry(conn)
+    return romanized_candidates
 
 
 def _language_code(row) -> str | None:
@@ -243,11 +222,6 @@ def _group_lookup_candidates(
         )
 
     return entities
-
-
-@lru_cache(maxsize=1)
-def _romanizer() -> Romanizer:
-    return Romanizer()
 
 
 def _romanize_lookup_names(

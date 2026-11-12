@@ -1,8 +1,5 @@
 import argparse
-import sqlite3
 import sys
-
-from functools import lru_cache
 
 from name_transduction_engine.datasets.dataset_provider import (
     WikidataBuildOptions,
@@ -33,33 +30,27 @@ from name_transduction_engine.datasets.maintenance import (
     clean_data,
     format_clean_report,
 )
-from name_transduction_engine import paths
+
 from name_transduction_engine.datasets.availability import (
     DataBusy,
     clear_stale_notice,
     data_lock,
 )
 from name_transduction_engine.datasets.update import DEFAULT_MAX_AGE_DAYS, run_update
-from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
 from name_transduction_engine.transduction.lookup.lookup_name import LookupName
 
-from name_transduction_engine.normalization.language_code_normalization import (
-    LanguageRegistry,
-    RegistryError,
+from name_transduction_engine.transduction.service import (
+    get_romanization_result,
+    get_lookup_result,
+    get_language_list_result,
+    get_language_search_result,
+    get_language_result,
+    DataMissing,
+    InvalidInput,
     UnknownLanguageError,
-    resolve_user_language,
+    LanguageResult,
+    RelatedLanguage,
 )
-from name_transduction_engine.datasets.language_codes.data_provision import (
-    read_registry,
-)
-from name_transduction_engine.datasets.language_codes.info import (
-    Coverage,
-    raw_tags_for,
-    read_coverage,
-    rows_for_tag,
-    search_languages,
-)
-from name_transduction_engine.transliteration.romanizer import Romanizer
 
 # --------------------------------------------------------------------------- #
 # Command handlers
@@ -68,6 +59,7 @@ from name_transduction_engine.transliteration.romanizer import Romanizer
 #   0  -> success or no result
 #   1  -> error
 #   2  -> reserved by argparse for usage errors
+#   3  -> data being rebuilt by `nte update` (DataUnavailable, handled in main)
 # --------------------------------------------------------------------------- #
 
 
@@ -160,20 +152,14 @@ def cmd_data_clean(args: argparse.Namespace) -> int:
 
 
 def cmd_lookup(args: argparse.Namespace) -> int:
-    if not args.name.strip():
-        print("error: name is empty", file=sys.stderr)
-        return 1
-
     try:
-        result = lookup_name(args.name, args.to)
-    except UnknownLanguageError as exc:
-        # The message already carries did-you-mean suggestions
+        result = get_lookup_result(args.to, args.name)
+    except (InvalidInput, UnknownLanguageError) as exc:
+        # An unknown language's message already carries did-you-mean suggestions
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except (RegistryError, sqlite3.DatabaseError) as exc:
-        print(
-            f"error: lookup data unavailable ({exc}); run `nte init`", file=sys.stderr
-        )
+    except DataMissing as exc:
+        print(f"error: {exc}; run `nte init`", file=sys.stderr)
         return 1
 
     entities = result.entities
@@ -242,101 +228,83 @@ _MATCHED_VIA = {
 
 def cmd_lang(args: argparse.Namespace) -> int:
     try:
-        conn = sqlite3.connect(f"file:{paths.DB_PATH}?mode=ro", uri=True)
-    except sqlite3.DatabaseError as exc:
-        print(
-            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
-        )
-        return 1
-    try:
-        registry = read_registry(conn)
-        coverage = read_coverage(conn)
         if args.list:
-            return _lang_list(registry, coverage, args.limit)
+            lang_list = get_language_list_result()
+            if not lang_list.sources:
+                print("error: no dataset built; run `nte init`", file=sys.stderr)
+                return 1
+            print(f"[languages] {len(lang_list.languages)} languages have names")
+            width = max((len(lang.code) for lang in lang_list.languages), default=4)
+            for lang in lang_list.languages:
+                counts = _format_counts(lang.counts, lang_list.sources)
+                print(f"  {lang.code:<{width}}  {counts}  {lang.name or '?'}")
+            return 0
         if args.search is not None:
-            return _lang_search(registry, coverage, args.search, args.limit)
+            matches = get_language_search_result(args.search).matches
+            if not matches:
+                print(f"[search] no language code or name contains {args.search!r}")
+                return 0
+
+            print(f"[search] {args.search!r}: {len(matches)} match(es)")
+            width = max(len(m.code) for m in matches)
+            for m in matches:
+                via = f"  (as {m.matched!r})" if m.matched else ""
+                print(f"  {m.code:<{width}}  {m.name}{via}  [{m.names:,} names]")
+            return 0
+
         if args.query is None:
             print(
                 "error: give a language to resolve, or use --search / --list",
                 file=sys.stderr,
             )
             return 2
-        return _lang_show(conn, registry, coverage, args.query)
-    except (RegistryError, sqlite3.DatabaseError) as exc:
-        print(
-            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
-        )
-        return 1
-    finally:
-        conn.close()
-
-
-def cmd_romanize(args: argparse.Namespace) -> int:
-    try:
-        conn = sqlite3.connect(f"file:{paths.DB_PATH}?mode=ro", uri=True)
-    except sqlite3.DatabaseError as exc:
-        print(
-            f"error: language data unavailable ({exc}); run `nte init`", file=sys.stderr
-        )
-        return 1
-
-    try:
-        registry = read_registry(conn)
-        language = resolve_user_language(args.lang, registry)
-        romanizer = _romanizer()
-        romanization = romanizer.romanize(args.text, str(language.tag))
-
-        print(
-            f"[romanize] {args.text!r} from {str(language.tag)}."
-        )
-
-        for note in language.notes:
-            print(f"[note] {note}")
-
-        for warning in romanization.warnings:
-            print(f"[warning] {warning}")
-
-        print(f"[result] {romanization.text} confidence={romanization.confidence}")
-
+        _print_language(get_language_result(args.query))
         return 0
     except UnknownLanguageError as exc:
         # The message already carries did-you-mean suggestions
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except (RegistryError, sqlite3.DatabaseError) as exc:
-        print(
-            f"error: language data unavailable ({exc}); run `nte init`",
-            file=sys.stderr,
-        )
+    except DataMissing as exc:
+        print(f"error: {exc}; run `nte init`", file=sys.stderr)
         return 1
-    finally:
-        conn.close()
 
 
-@lru_cache(maxsize=1)
-def _romanizer() -> Romanizer:
-    return Romanizer()
-
-
-def _lang_show(
-    conn: sqlite3.Connection,
-    registry: LanguageRegistry,
-    coverage: Coverage,
-    query: str,
-) -> int:
+def cmd_romanize(args: argparse.Namespace) -> int:
     try:
-        resolved = resolve_user_language(query, registry)
+        result = get_romanization_result(args.lang, args.text)
     except UnknownLanguageError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except DataMissing as exc:
+        print(
+            f"error: {exc}; run `nte init`",
+            file=sys.stderr,
+        )
+        return 1
 
-    tag = resolved.tag
-    rec = registry.record(tag.lang)
-    print(f"[language] {query!r} -> {tag}  {rec.name}")
+    print(f"[romanize] {args.text!r} from {str(result.language.tag)}.")
+
+    for note in result.language.notes:
+        print(f"[note] {note}")
+
+    for warning in result.romanization.warnings:
+        print(f"[warning] {warning}")
+
     print(
-        f"  matched   : {_MATCHED_VIA.get(resolved.matched_via, resolved.matched_via)}"
+        f"[result] {result.romanization.text} confidence={result.romanization.confidence}"
     )
-    for note in resolved.notes:
+
+    return 0
+
+
+def _print_language(result: LanguageResult) -> None:
+    language, rec = result.language, result.record
+    tag = language.tag
+    print(f"[language] {language.input!r} -> {tag}  {rec.name}")
+    print(
+        f"  matched   : {_MATCHED_VIA.get(language.matched_via, language.matched_via)}"
+    )
+    for note in language.notes:
         print(f"  note      : {note}")
 
     codes = [
@@ -362,99 +330,50 @@ def _lang_show(
         )
 
     # Coverage: what `nte lookup --to <query>` can actually return
-    raw_tags = raw_tags_for(conn, tag.lang)
-    if not coverage.sources:
+    if not result.sources:
         print("  names     : unknown (no dataset built; run `nte init`)")
     else:
-        counts = rows_for_tag(raw_tags, tag)
-        print(f"  names     : {_format_counts(counts, coverage.sources)}")
-        if raw_tags:
-            counted = {id(r) for r in raw_tags if rows_for_tag([r], tag)}
+        print(f"  names     : {_format_counts(result.counts, result.sources)}")
+        if result.tags:
             shown = ", ".join(
-                f"{r.source}:{r.raw_tag!r} ({r.rows:,})"
-                + (f" = {r.tag}" if str(r.tag) != tag.lang else "")
-                + ("" if id(r) in counted else " [excluded]")
-                for r in raw_tags[:8]
+                f"{t.raw.source}:{t.raw.raw_tag!r} ({t.raw.rows:,})"
+                + (f" = {t.raw.tag}" if str(t.raw.tag) != tag.lang else "")
+                + ("" if t.counted else " [excluded]")
+                for t in result.tags[:8]
             )
-            more = f" … +{len(raw_tags) - 8} more" if len(raw_tags) > 8 else ""
+            more = f" … +{len(result.tags) - 8} more" if len(result.tags) > 8 else ""
             print(f"  from tags : {shown}{more}")
 
     # Macrolanguage relations, with coverage so the user can see where names are
-    if rec.macrolanguage:
-        macro = rec.macrolanguage
+    if result.macrolanguage:
         print(
-            f"  part of   : {registry.describe(macro)} [{coverage.total(macro):,} names]"
+            f"  part of   : {_describe(result.macrolanguage)} "
+            f"[{result.macrolanguage.names:,} names]"
         )
-    members = registry.members_of(tag.lang)
-    if members:
-        ranked = sorted(members, key=lambda m: (-coverage.total(m), m))
-        with_data = [m for m in ranked if coverage.total(m)]
-        listed = ", ".join(f"{m} [{coverage.total(m):,}]" for m in with_data[:10])
+    if result.members:
+        with_data = [m for m in result.members if m.names]
+        listed = ", ".join(f"{m.code} [{m.names:,}]" for m in with_data[:10])
         print(
-            f"  members   : {len(members)} languages, {len(with_data)} with names"
+            f"  members   : {len(result.members)} languages, "
+            f"{len(with_data)} with names"
             + (f": {listed}" if listed else "")
             + (" …" if len(with_data) > 10 else "")
         )
 
     # The hint: nothing here, but a related language has names
-    if coverage.sources and not sum(rows_for_tag(raw_tags, tag).values()):
-        related = [x for x in (rec.macrolanguage, *members) if x and coverage.total(x)]
-        if related:
-            best = max(related, key=lambda x: (coverage.total(x), x))
+    if result.sources and not result.total:
+        best = result.suggestion
+        if best:
             print(
-                f"[hint] no names are tagged {tag}; try `--to {best}` "
-                f"({registry.record(best).name}, {coverage.total(best):,} names)"
+                f"[hint] no names are tagged {tag}; try `--to {best.code}` "
+                f"({best.name}, {best.names:,} names)"
             )
         else:
             print(f"[hint] no names are tagged {tag} in either dataset")
-    return 0
 
 
-def _lang_search(
-    registry: LanguageRegistry, coverage: Coverage, text: str, limit: int
-) -> int:
-    hits = search_languages(registry, text)
-    if not hits:
-        print(f"[search] no language code or name contains {text!r}")
-        return 0
-    # Within each match quality, languages with more names first
-    hits.sort(key=lambda h: (h.rank, -coverage.total(h.code), h.code))
-    shown = hits if limit <= 0 else hits[:limit]
-    print(
-        f"[search] {text!r}: {len(hits)} match(es)"
-        + (f", showing {len(shown)}" if len(shown) < len(hits) else "")
-    )
-    width = max(len(h.code) for h in shown)
-    for h in shown:
-        rec = registry.record(h.code)
-        via = "" if h.matched in (rec.name, h.code) else f"  (as {h.matched!r})"
-        print(
-            f"  {h.code:<{width}}  {rec.name}{via}  [{coverage.total(h.code):,} names]"
-        )
-    return 0
-
-
-def _lang_list(registry: LanguageRegistry, coverage: Coverage, limit: int) -> int:
-    if not coverage.sources:
-        print("error: no dataset built; run `nte init`", file=sys.stderr)
-        return 1
-    langs = sorted(coverage.by_lang, key=lambda lang: (-coverage.total(lang), lang))
-    shown = langs if limit <= 0 else langs[:limit]
-    print(
-        f"[languages] {len(langs)} languages have names"
-        + (
-            f", showing the top {len(shown)} (--limit 0 for all)"
-            if len(shown) < len(langs)
-            else ""
-        )
-    )
-    width = max((len(x) for x in shown), default=4)
-    for lang in shown:
-        name = registry.record(lang).name if lang in registry else "?"
-        print(
-            f"  {lang:<{width}}  {_format_counts(coverage.per_source(lang), coverage.sources)}  {name}"
-        )
-    return 0
+def _describe(language: RelatedLanguage) -> str:
+    return f"{language.code} ({language.name})" if language.name else language.code
 
 
 def _format_counts(counts: dict[str, int], sources: tuple[str, ...]) -> str:
@@ -716,7 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also show matched entities that have no name in the target language",
     )
-    p_lookup.set_defaults(func=cmd_lookup, needs_data=True)
+    p_lookup.set_defaults(func=cmd_lookup)
 
     # Language information
     p_lang = sub.add_parser(
@@ -743,13 +662,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="list the languages that have names in the database, most names first",
     )
-    p_lang.add_argument(
-        "--limit",
-        type=int,
-        default=25,
-        help="rows to show for --search/--list (0 = all; default 25)",
-    )
-    p_lang.set_defaults(func=cmd_lang, needs_data=True)
+    p_lang.set_defaults(func=cmd_lang)
 
     # Romanization
     p_romanization = sub.add_parser(
@@ -770,12 +683,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="the name to romanize (use -- before text that starts with a dash)",
     )
 
-    p_romanization.set_defaults(func=cmd_romanize, needs_data=True)
+    p_romanization.set_defaults(func=cmd_romanize)
 
     # Explain
     p_ex = sub.add_parser("explain", help="show the transduction pipeline trace")
     p_ex.add_argument("name")
     p_ex.add_argument("--to", required=True, metavar="LANG")
-    p_ex.set_defaults(func=cmd_explain, needs_data=True)
+    p_ex.set_defaults(func=cmd_explain)
 
     return parser
