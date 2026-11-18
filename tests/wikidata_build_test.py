@@ -2,17 +2,17 @@
 every block, extraction, and interrupted builds giving the same result as an
 uninterrupted one.
 
-Run: uv run python tests/wikidata_build_test.py   (under a minute)
+Run: uv run pytest tests/wikidata_build_test.py   (under a minute)
 """
 
 import bz2
 import gzip
 import json
 import random
-import sys
-import tempfile
 
 from pathlib import Path
+
+import pytest
 
 from name_transduction_engine.datasets.wikidata import classes as C
 from name_transduction_engine.datasets.wikidata.build import (
@@ -219,8 +219,15 @@ def make_dump(path: Path) -> None:
     path.write_bytes(bz2.compress(raw.encode("utf-8"), compresslevel=1))
 
 
-def check_block_resume(path: Path) -> None:
-    data = path.read_bytes()
+@pytest.fixture(scope="module")
+def dump(tmp_path_factory) -> Path:
+    path = tmp_path_factory.mktemp("dump") / "wikidata-20990101-all.json.bz2"
+    make_dump(path)
+    return path
+
+
+def test_bz2_resume_at_any_block(dump):
+    data = dump.read_bytes()
     original = bz2.decompress(data)
 
     def chunks(start, size=50_000):
@@ -235,7 +242,6 @@ def check_block_resume(path: Path) -> None:
     for bit in sample:
         out = b"".join(o for o, _ in decode(chunks(bit // 8), bit, spliced=True))
         assert out and original.endswith(out), f"resume at bit {bit} failed"
-    print(f"ok: resume from {len(sample)} of {len(blocks)} bzip2 blocks")
 
 
 def compact_lines(directory: Path) -> list[bytes]:
@@ -245,59 +251,45 @@ def compact_lines(directory: Path) -> list[bytes]:
     return sorted(lines)
 
 
-def main() -> int:
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        dump = tmp / "wikidata-20990101-all.json.bz2"
-        make_dump(dump)
-        check_block_resume(dump)
+def test_interrupted_build_gives_the_same_dataset(dump, tmp_path, monkeypatch):
+    classes = tmp_path / "classes.tsv"
+    C.write_class_map(
+        {
+            "Q515": "city",
+            "Q532": "village",
+            "Q3024240": "historical_country",
+            "Q8502": "mountain",
+        },
+        "test",
+        classes,
+    )
+    monkeypatch.setattr(C, "CLASSES_PATH", classes)
 
-        classes = tmp / "classes.tsv"
-        C.write_class_map(
-            {
-                "Q515": "city",
-                "Q532": "village",
-                "Q3024240": "historical_country",
-                "Q8502": "mountain",
-            },
-            "test",
-            classes,
+    def run(name, **kw):
+        options = BuildOptions(
+            source=str(dump),
+            work_dir=tmp_path / name / "work",
+            compact_dir=tmp_path / name / "compact",
+            **kw,
         )
-        C.CLASSES_PATH = classes
+        return build_wikidata_compact(options)
 
-        def run(name, **kw):
-            options = BuildOptions(
-                source=str(dump),
-                work_dir=tmp / name / "work",
-                compact_dir=tmp / name / "compact",
-                **kw,
-            )
-            return build_wikidata_compact(options)
+    assert run("clean") == 0
+    expected = compact_lines(tmp_path / "clean" / "compact")
+    manifest = json.loads((tmp_path / "clean" / "compact" / "manifest.json").read_text())
+    stats = manifest["extraction"]
+    assert stats.get("skip:offworld", 0) > 0, stats
+    kinds = manifest["groups"]["historical_place"]["kinds"]
+    assert kinds.get("ancient_place", 0) > 0 and kinds.get("historical_country", 0) > 0
+    record = json.loads(expected[0])
+    assert all(n["text"] != "FR-75" for n in record["names"]), "junk alias kept"
 
-        assert run("clean") == 0
-        expected = compact_lines(tmp / "clean" / "compact")
-        manifest = json.loads((tmp / "clean" / "compact" / "manifest.json").read_text())
-        stats = manifest["extraction"]
-        assert stats.get("skip:offworld", 0) > 0, stats
-        kinds = manifest["groups"]["historical_place"]["kinds"]
-        assert (
-            kinds.get("ancient_place", 0) > 0 and kinds.get("historical_country", 0) > 0
-        )
-        record = json.loads(expected[0])
-        assert all(n["text"] != "FR-75" for n in record["names"]), "junk alias kept"
-
-        steps = 0
-        while True:
-            steps += 1
-            assert run("resumed", stop_after_gb=0.0002) == 0
-            state = json.loads((tmp / "resumed" / "work" / "state.json").read_text())
-            if state["status"] == "finished":
-                break
-            assert steps < 200
-        assert compact_lines(tmp / "resumed" / "compact") == expected
-        print(f"ok: {steps} stop/resume steps give the same {len(expected):,} records")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    steps = 0
+    while True:
+        steps += 1
+        assert run("resumed", stop_after_gb=0.0002) == 0
+        state = json.loads((tmp_path / "resumed" / "work" / "state.json").read_text())
+        if state["status"] == "finished":
+            break
+        assert steps < 200
+    assert compact_lines(tmp_path / "resumed" / "compact") == expected

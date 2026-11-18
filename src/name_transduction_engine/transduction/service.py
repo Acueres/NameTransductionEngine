@@ -34,6 +34,12 @@ from name_transduction_engine.normalization.language_code_normalization import (
 )
 from name_transduction_engine.paths import DB_PATH
 from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
+from name_transduction_engine.transduction.lookup.lookup_entity import LookupOutcome
+from name_transduction_engine.transliteration.romanization import (
+    IDENTITY,
+    dominant_script,
+    non_latin_scripts,
+)
 
 from .db import get_conn
 from .resources import get_coverage, get_registry, get_romanizer
@@ -46,6 +52,7 @@ from .results import (
     LookupResult,
     RelatedLanguage,
     RomanizationResult,
+    RomanizeOutcome,
     TagCount,
 )
 
@@ -61,6 +68,9 @@ __all__ = [
     "DataUnavailable",
     "InvalidInput",
     "UnknownLanguageError",
+    # Outcomes
+    "LookupOutcome",
+    "RomanizeOutcome",
     # Results
     "LanguageListResult",
     "LanguageMatch",
@@ -112,15 +122,29 @@ def get_lookup_result(lang: str, name: str) -> LookupResult:
     if not name.strip():
         raise InvalidInput("name is empty")
     language = resolve_user_language(lang, get_registry(DB_PATH))
-    entities = lookup_name(name, language.tag, get_romanizer(), DB_PATH)
-    return LookupResult(entities=tuple(entities), language=language)
+    entities = tuple(lookup_name(name, language.tag, get_romanizer(), DB_PATH))
+    if not entities:
+        outcome = LookupOutcome.NO_MATCH
+    elif any(e.outcome is LookupOutcome.FOUND for e in entities):
+        outcome = LookupOutcome.FOUND
+    else:
+        outcome = LookupOutcome.NO_TARGET_NAME
+    return LookupResult(outcome=outcome, entities=entities, language=language)
 
 
 @_operation("language")
 def get_romanization_result(lang: str, text: str) -> RomanizationResult:
     language = resolve_user_language(lang, get_registry(DB_PATH))
     romanization = get_romanizer().romanize(text, str(language.tag))
-    return RomanizationResult(romanization, language)
+    if dominant_script(text)[0] is None:
+        outcome = RomanizeOutcome.UNTRANSDUCIBLE
+    elif not non_latin_scripts(text):
+        outcome = RomanizeOutcome.ALREADY_LATIN
+    elif romanization.transform == IDENTITY:
+        outcome = RomanizeOutcome.NATIVE_KEPT
+    else:
+        outcome = RomanizeOutcome.ROMANIZED
+    return RomanizationResult(outcome, romanization, language)
 
 
 @_operation("language")

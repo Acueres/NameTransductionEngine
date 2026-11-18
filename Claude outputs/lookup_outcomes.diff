@@ -1,0 +1,138 @@
+--- orig/lookup_entity.py	2026-11-19 00:48:27.226390739 +0500
++++ lookup_entity.py	2026-11-19 00:48:41.096567235 +0500
+@@ -1,7 +1,14 @@
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
++from enum import StrEnum
+ from .lookup_name import LookupName
+ 
+ 
++class LookupOutcome(StrEnum):
++    FOUND = "found"  # a name in the target language
++    NO_TARGET_NAME = "no_target_name"  # found, but no name in that language
++    NO_MATCH = "no_match"  # no entity has a name equal to the input
++
++
+ @dataclass(frozen=True)
+ class LookupEntity:
+     source: str
+@@ -17,3 +24,10 @@
+     # Latin-script names of the entity (GeoNames primary name, English
+     # names), used as reading hints by the romanizer
+     reference_names: tuple[str, ...] = ()
++
++    # Follows from `names`; never passed in
++    outcome: LookupOutcome = field(init=False)
++
++    def __post_init__(self) -> None:
++        outcome = LookupOutcome.FOUND if self.names else LookupOutcome.NO_TARGET_NAME
++        object.__setattr__(self, "outcome", outcome)
+--- orig/lookup_name.py	2026-11-19 00:48:27.226402690 +0500
++++ lookup_name.py	2026-11-19 00:48:43.136567356 +0500
+@@ -1,4 +1,5 @@
+ from dataclasses import dataclass
++from typing import Literal
+ from name_transduction_engine.transliteration.romanization import Romanization
+ 
+ 
+@@ -7,3 +8,5 @@
+     name: str
+     romanization: Romanization | None
+     language_code: str
++    # "attested": from a database. "generated" arrives with adaptation (Phase 3)
++    origin: Literal["attested", "generated"] = "attested"
+--- orig/results.py	2026-11-19 00:48:27.226416128 +0500
++++ results.py	2026-11-19 00:48:50.440567790 +0500
+@@ -1,6 +1,9 @@
+ from dataclasses import dataclass
+ 
+-from name_transduction_engine.transduction.lookup.lookup_entity import LookupEntity
++from name_transduction_engine.transduction.lookup.lookup_entity import (
++    LookupEntity,
++    LookupOutcome,
++)
+ from name_transduction_engine.transliteration.romanization import Romanization
+ from name_transduction_engine.normalization.language_code_normalization import (
+     LanguageQuery,
+@@ -11,7 +14,10 @@
+ 
+ @dataclass(frozen=True)
+ class LookupResult:
+-    entities: tuple[LookupEntity, ...]
++    # FOUND: some entity has a target-language name; NO_TARGET_NAME: entities
++    # were found, none has one; NO_MATCH: no entity has the input as a name
++    outcome: LookupOutcome
++    entities: tuple[LookupEntity, ...]  # each with its own outcome
+     language: LanguageQuery
+ 
+ 
+--- orig/service.py	2026-11-19 00:48:27.226425948 +0500
++++ service.py	2026-11-19 00:48:59.168568309 +0500
+@@ -34,6 +34,7 @@
+ )
+ from name_transduction_engine.paths import DB_PATH
+ from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
++from name_transduction_engine.transduction.lookup.lookup_entity import LookupOutcome
+ 
+ from .db import get_conn
+ from .resources import get_coverage, get_registry, get_romanizer
+@@ -61,6 +62,8 @@
+     "DataUnavailable",
+     "InvalidInput",
+     "UnknownLanguageError",
++    # Outcomes
++    "LookupOutcome",
+     # Results
+     "LanguageListResult",
+     "LanguageMatch",
+@@ -112,8 +115,14 @@
+     if not name.strip():
+         raise InvalidInput("name is empty")
+     language = resolve_user_language(lang, get_registry(DB_PATH))
+-    entities = lookup_name(name, language.tag, get_romanizer(), DB_PATH)
+-    return LookupResult(entities=tuple(entities), language=language)
++    entities = tuple(lookup_name(name, language.tag, get_romanizer(), DB_PATH))
++    if not entities:
++        outcome = LookupOutcome.NO_MATCH
++    elif any(e.outcome is LookupOutcome.FOUND for e in entities):
++        outcome = LookupOutcome.FOUND
++    else:
++        outcome = LookupOutcome.NO_TARGET_NAME
++    return LookupResult(outcome=outcome, entities=entities, language=language)
+ 
+ 
+ @_operation("language")
+--- orig/cli.py	2026-11-19 00:48:27.226349648 +0500
++++ cli.py	2026-11-19 00:49:07.904568829 +0500
+@@ -48,6 +48,7 @@
+     DataMissing,
+     InvalidInput,
+     UnknownLanguageError,
++    LookupOutcome,
+     LanguageResult,
+     RelatedLanguage,
+ )
+@@ -172,12 +173,12 @@
+     for note in result.language.notes:
+         print(f"[note] {note}")
+ 
+-    if not entities:
++    if result.outcome is LookupOutcome.NO_MATCH:
+         print("[result] no match")
+         return 0
+ 
+     for entity in entities:
+-        if not entity.names and not args.all:
++        if entity.outcome is LookupOutcome.NO_TARGET_NAME and not args.all:
+             continue
+ 
+         location = ""
+@@ -191,7 +192,7 @@
+             f"{location}"
+         )
+ 
+-        if not entity.names:
++        if entity.outcome is LookupOutcome.NO_TARGET_NAME:
+             print(f"  [name] no name for language={result.language.tag}")
+             continue
+ 

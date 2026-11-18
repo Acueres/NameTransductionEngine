@@ -1,0 +1,93 @@
+--- orig/results.py	2026-11-19 00:59:38.541448607 +0500
++++ results.py	2026-11-19 00:59:45.230265976 +0500
+@@ -1,4 +1,5 @@
+ from dataclasses import dataclass
++from enum import StrEnum
+ 
+ from name_transduction_engine.transduction.lookup.lookup_entity import (
+     LookupEntity,
+@@ -19,8 +20,16 @@
+     language: LanguageQuery
+ 
+ 
++class RomanizeOutcome(StrEnum):
++    ROMANIZED = "romanized"
++    ALREADY_LATIN = "already_latin"
++    NATIVE_KEPT = "native_kept"  # no romanization available for the script
++    UNTRANSDUCIBLE = "untransducible"  # nothing to romanize (spaces, emoji)
++
++
+ @dataclass(frozen=True)
+ class RomanizationResult:
++    outcome: RomanizeOutcome
+     romanization: Romanization
+     language: LanguageQuery
+ 
+--- orig/service.py	2026-11-19 00:59:38.541475463 +0500
++++ service.py	2026-11-19 00:59:56.278266633 +0500
+@@ -35,6 +35,11 @@
+ from name_transduction_engine.paths import DB_PATH
+ from name_transduction_engine.transduction.lookup.lookup_engine import lookup_name
+ from name_transduction_engine.transduction.lookup.lookup_entity import LookupOutcome
++from name_transduction_engine.transliteration.romanization import (
++    IDENTITY,
++    dominant_script,
++    non_latin_scripts,
++)
+ 
+ from .db import get_conn
+ from .resources import get_coverage, get_registry, get_romanizer
+@@ -47,6 +52,7 @@
+     LookupResult,
+     RelatedLanguage,
+     RomanizationResult,
++    RomanizeOutcome,
+     TagCount,
+ )
+ 
+@@ -64,6 +70,7 @@
+     "UnknownLanguageError",
+     # Outcomes
+     "LookupOutcome",
++    "RomanizeOutcome",
+     # Results
+     "LanguageListResult",
+     "LanguageMatch",
+@@ -129,7 +136,15 @@
+ def get_romanization_result(lang: str, text: str) -> RomanizationResult:
+     language = resolve_user_language(lang, get_registry(DB_PATH))
+     romanization = get_romanizer().romanize(text, str(language.tag))
+-    return RomanizationResult(romanization, language)
++    if dominant_script(text)[0] is None:
++        outcome = RomanizeOutcome.UNTRANSDUCIBLE
++    elif not non_latin_scripts(text):
++        outcome = RomanizeOutcome.ALREADY_LATIN
++    elif romanization.transform == IDENTITY:
++        outcome = RomanizeOutcome.NATIVE_KEPT
++    else:
++        outcome = RomanizeOutcome.ROMANIZED
++    return RomanizationResult(outcome, romanization, language)
+ 
+ 
+ @_operation("language")
+--- orig/cli.py	2026-11-19 00:59:38.541351539 +0500
++++ cli.py	2026-11-19 01:00:00.234307852 +0500
+@@ -49,6 +49,7 @@
+     InvalidInput,
+     UnknownLanguageError,
+     LookupOutcome,
++    RomanizeOutcome,
+     LanguageResult,
+     RelatedLanguage,
+ )
+@@ -288,6 +289,10 @@
+     for note in result.language.notes:
+         print(f"[note] {note}")
+ 
++    if result.outcome is RomanizeOutcome.UNTRANSDUCIBLE:
++        print("[result] untransducible: nothing to romanize")
++        return 0
++
+     for warning in result.romanization.warnings:
+         print(f"[warning] {warning}")
+ 

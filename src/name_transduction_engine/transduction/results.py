@@ -1,6 +1,10 @@
 from dataclasses import dataclass
+from enum import StrEnum
 
-from name_transduction_engine.transduction.lookup.lookup_entity import LookupEntity
+from name_transduction_engine.transduction.lookup.lookup_entity import (
+    LookupEntity,
+    LookupOutcome,
+)
 from name_transduction_engine.transliteration.romanization import Romanization
 from name_transduction_engine.normalization.language_code_normalization import (
     LanguageQuery,
@@ -11,12 +15,21 @@ from name_transduction_engine.datasets.language_codes.info import RawTagCount
 
 @dataclass(frozen=True)
 class LookupResult:
+    outcome: LookupOutcome
     entities: tuple[LookupEntity, ...]
     language: LanguageQuery
 
 
+class RomanizeOutcome(StrEnum):
+    ROMANIZED = "romanized"
+    ALREADY_LATIN = "already_latin"
+    NATIVE_KEPT = "native_kept"  # no romanization available for the script
+    UNTRANSDUCIBLE = "untransducible"  # nothing to romanize (spaces, emoji)
+
+
 @dataclass(frozen=True)
 class RomanizationResult:
+    outcome: RomanizeOutcome
     romanization: Romanization
     language: LanguageQuery
 

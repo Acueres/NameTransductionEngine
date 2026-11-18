@@ -1,10 +1,13 @@
 """Golden cases for the romanizer: (text, lang tag, expected).
 
-Run: uv run python tests/romanizer_test.py   (prints mismatches)
+Run: uv run pytest tests/romanizer_test.py
+Persian and Arabic cases are skipped when their models are not built
+(`nte data build models`).
 """
 
-import sys
+import pytest
 
+from name_transduction_engine import paths
 from name_transduction_engine.transliteration.romanizer import Romanizer
 
 CASES: list[tuple[str, str | None, str]] = [
@@ -375,24 +378,34 @@ HINT_CASES: list[tuple[str, str | None, tuple[str, ...], str]] = [
 ]
 
 
-def main() -> int:
-    r = Romanizer()
-    bad = 0
-    cases = [(t, lang, (), want) for t, lang, want in CASES] + HINT_CASES
-    for text, lang, hints, expected in cases:
-        res = r.romanize(text, lang, hints)
-        ok = expected is None or res.text == expected
-        mark = "  " if ok else "✗ "
-        if not ok:
-            bad += 1
-        if not ok or "-v" in sys.argv:
-            print(
-                f"{mark}{text!r:22} {str(lang):8} -> {res.text!r:28}"
-                f" want {expected!r:24} [{res.transform}, {res.confidence}] {res.warnings}"
-            )
-    print(f"{len(cases) - bad}/{len(cases)} as expected")
-    return 1 if bad else 0
+MODELS_BUILT = paths.PERSIAN_MODEL_PATH.exists() and paths.ARABIC_MODEL_PATH.exists()
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def _needs_models(text: str, lang: str | None) -> bool:
+    """Persian and Arabic readings come from the learned models, and so does
+    untagged Arabic-script text"""
+    arabic_script = any("\u0600" <= ch <= "\u06ff" for ch in text)
+    return lang in ("fa", "ar") or (lang is None and arabic_script)
+
+
+def _params():
+    for text, lang, hints, expected in [
+        *[(t, lang, (), want) for t, lang, want in CASES],
+        *HINT_CASES,
+    ]:
+        marks = ()
+        if not MODELS_BUILT and _needs_models(text, lang):
+            marks = pytest.mark.skip(reason="Persian/Arabic models not built")
+        yield pytest.param(text, lang, hints, expected, marks=marks)
+
+
+@pytest.fixture(scope="module")
+def romanizer() -> Romanizer:
+    return Romanizer()
+
+
+@pytest.mark.parametrize("text, lang, hints, expected", list(_params()))
+def test_romanizer(romanizer, text, lang, hints, expected):
+    result = romanizer.romanize(text, lang, hints)
+    if expected is not None:  # None: anything, as long as it does not crash
+        assert result.text == expected, (result.transform, result.warnings)

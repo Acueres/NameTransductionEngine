@@ -48,6 +48,8 @@ from name_transduction_engine.transduction.service import (
     DataMissing,
     InvalidInput,
     UnknownLanguageError,
+    LookupOutcome,
+    RomanizeOutcome,
     LanguageResult,
     RelatedLanguage,
 )
@@ -172,12 +174,12 @@ def cmd_lookup(args: argparse.Namespace) -> int:
     for note in result.language.notes:
         print(f"[note] {note}")
 
-    if not entities:
+    if result.outcome is LookupOutcome.NO_MATCH:
         print("[result] no match")
         return 0
 
     for entity in entities:
-        if not entity.names and not args.all:
+        if entity.outcome is LookupOutcome.NO_TARGET_NAME and not args.all:
             continue
 
         location = ""
@@ -191,7 +193,7 @@ def cmd_lookup(args: argparse.Namespace) -> int:
             f"{location}"
         )
 
-        if not entity.names:
+        if entity.outcome is LookupOutcome.NO_TARGET_NAME:
             print(f"  [name] no name for language={result.language.tag}")
             continue
 
@@ -286,6 +288,10 @@ def cmd_romanize(args: argparse.Namespace) -> int:
 
     for note in result.language.notes:
         print(f"[note] {note}")
+
+    if result.outcome is RomanizeOutcome.UNTRANSDUCIBLE:
+        print("[result] untransducible: nothing to romanize")
+        return 0
 
     for warning in result.romanization.warnings:
         print(f"[warning] {warning}")
