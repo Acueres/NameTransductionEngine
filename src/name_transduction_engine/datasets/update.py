@@ -14,6 +14,7 @@ from name_transduction_engine.models.model_provider import (
     ensure_models,
 )
 from .availability import clear_stale_notice, data_lock, maintenance
+from .country_codes.load import is_country_codes_ready
 from .dataset_provider import ensure_datasets
 from .geonames.data_provision import current_geonames_source
 from .geonames.download import GEONAMES_URLS
@@ -143,6 +144,8 @@ def stale_parts() -> list[str]:
     parts = []
     if not is_language_codes_ready(db, current_language_codes_source()):
         parts.append("language codes (and what was loaded with the old registry)")
+    if not is_country_codes_ready(db):
+        parts.append("country codes")
     if not is_geonames_ready(db, current_geonames_source()):
         parts.append("GeoNames")
     dataset = current_wikidata_dataset()

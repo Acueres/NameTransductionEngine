@@ -5,6 +5,7 @@ from pathlib import Path
 
 from name_transduction_engine.paths import (
     DB_PATH,
+    RAW_DIR_COUNTRY_CODES,
     RAW_DIR_GEONAMES,
     RAW_DIR_LANGUAGE_CODES,
     RAW_DIR_WIKIDATA,
@@ -22,6 +23,8 @@ from .language_codes.load import (
     REGISTRY_FINGERPRINT_KEY as LANGUAGE_REGISTRY_FINGERPRINT_KEY,
     is_language_codes_ready,
 )
+from .country_codes.download import CLDR_TERRITORIES_FILENAME
+from .country_codes.load import is_country_codes_ready
 from .geonames.load import (
     REGISTRY_FINGERPRINT_KEY as GEONAMES_REGISTRY_FINGERPRINT_KEY,
     is_geonames_ready,
@@ -67,7 +70,12 @@ _WIKIDATA_TABLES = (
     WIKIDATA_LANGUAGE_TAG_TABLE,
 )
 
-_RAW_DIRS = (RAW_DIR_LANGUAGE_CODES, RAW_DIR_GEONAMES, RAW_DIR_WIKIDATA)
+_RAW_DIRS = (
+    RAW_DIR_LANGUAGE_CODES,
+    RAW_DIR_COUNTRY_CODES,
+    RAW_DIR_GEONAMES,
+    RAW_DIR_WIKIDATA,
+)
 
 # How many unmapped tags to list per source in `nte data status`
 _UNMAPPED_TAGS_SHOWN = 10
@@ -287,6 +295,13 @@ def collect_data_status() -> DataStatus:
                         table_counts=_table_counts(conn, _LANGUAGE_CODES_TABLES),
                     )
                 )
+                sources.append(
+                    SourceStatus(
+                        source="country_codes",
+                        ready=is_country_codes_ready(DB_PATH),
+                        table_counts=_table_counts(conn, ("country_codes",)),
+                    )
+                )
                 for source, ready, tables, tag_table, fingerprint_key in (
                     (
                         "geonames",
@@ -346,13 +361,18 @@ def collect_data_status() -> DataStatus:
             # Corrupt or locked DB
             sources = [
                 SourceStatus(source=name, ready=False, table_counts={})
-                for name in ("language_codes", "geonames", "wikidata")
+                for name in ("language_codes", "country_codes", "geonames", "wikidata")
             ]
 
     raw_artifacts = [
         _artifact(name, RAW_DIR_LANGUAGE_CODES / name)
         for name in (IANA_REGISTRY_FILENAME, ISO_LANGUAGECODES_FILENAME)
     ]
+    raw_artifacts.append(
+        _artifact(
+            CLDR_TERRITORIES_FILENAME, RAW_DIR_COUNTRY_CODES / CLDR_TERRITORIES_FILENAME
+        )
+    )
     raw_artifacts += [
         _artifact(name, RAW_DIR_GEONAMES / name)
         for name in (

@@ -1,4 +1,5 @@
 from .language_codes.data_provision import ensure_language_codes_sqlite, read_registry
+from .country_codes.data_provision import ensure_country_codes_sqlite
 from .geonames.data_provision import ensure_geonames_sqlite
 from .wikidata.data_provision import (
     BuildOptions as WikidataBuildOptions,
@@ -16,6 +17,7 @@ from .wikidata.data_provision import (
 __all__ = [
     "ensure_language_codes_sqlite",
     "read_registry",
+    "ensure_country_codes_sqlite",
     "ensure_geonames_sqlite",
     "WikidataBuildOptions",
     "build_wikidata_compact",
@@ -32,5 +34,6 @@ __all__ = [
 
 def ensure_datasets(force=False):
     ensure_language_codes_sqlite(force)
+    ensure_country_codes_sqlite(force)
     ensure_geonames_sqlite(force)
     ensure_wikidata_sqlite(force)

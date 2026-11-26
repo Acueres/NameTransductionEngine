@@ -2,6 +2,7 @@
 real loaders from the extracts in tests/fixtures/:
 
 - language_codes/: the IANA registry and GeoNames language list, complete
+- country_codes/: the CLDR 49 English territory names, complete
 - geonames/: eight places and their alternate names, in the GeoNames format
 - wikidata/: real records from the 20261026 dataset, trimmed to 19 languages
   (Moscow, Tokyo, Istanbul and Beijing are classified historical_admin there)
@@ -64,6 +65,10 @@ def _build_names_db(paths) -> None:
         load as language_codes,
         schema as language_codes_schema,
     )
+    from name_transduction_engine.datasets.country_codes import (
+        load as country_codes,
+        schema as country_codes_schema,
+    )
     from name_transduction_engine.datasets.geonames import (
         load as geonames,
         schema as geonames_schema,
@@ -84,6 +89,9 @@ def _build_names_db(paths) -> None:
         language_codes_schema.create_schema(conn)
         registry = language_codes.load_all_data(conn)
         language_codes.write_build_metadata(conn)
+
+        country_codes_schema.create_schema(conn)
+        country_codes.load_country_codes(conn)
 
         geonames_schema.create_schema(conn)
         geonames.load_all_data(conn, registry)
@@ -107,6 +115,16 @@ def _write_raw_files(paths) -> None:
         (paths.RAW_DIR_LANGUAGE_CODES / gz.stem).write_bytes(
             gzip.decompress(gz.read_bytes())
         )
+
+    from name_transduction_engine.datasets.country_codes.download import (
+        CLDR_TERRITORIES_FILENAME,
+    )
+
+    paths.RAW_DIR_COUNTRY_CODES.mkdir(parents=True)
+    shutil.copy(
+        FIXTURES / "country_codes" / "territories.json",
+        paths.RAW_DIR_COUNTRY_CODES / CLDR_TERRITORIES_FILENAME,
+    )
 
     paths.RAW_DIR_GEONAMES.mkdir(parents=True)
     for name in ("allCountries", "alternateNamesV2"):
